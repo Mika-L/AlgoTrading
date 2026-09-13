@@ -12,14 +12,45 @@ public sealed record PriceBar
 {
     public PriceBar(DateOnly date, decimal open, decimal high, decimal low, decimal close, long volume, decimal rawClose)
     {
-        if (open <= 0m) throw new ArgumentOutOfRangeException(nameof(open), open, "L'ouverture doit être strictement positive.");
-        if (high <= 0m) throw new ArgumentOutOfRangeException(nameof(high), high, "Le plus haut doit être strictement positif.");
-        if (low <= 0m) throw new ArgumentOutOfRangeException(nameof(low), low, "Le plus bas doit être strictement positif.");
-        if (close <= 0m) throw new ArgumentOutOfRangeException(nameof(close), close, "La clôture doit être strictement positive.");
-        if (volume < 0L) throw new ArgumentOutOfRangeException(nameof(volume), volume, "Le volume ne peut pas être négatif.");
-        if (high < low) throw new ArgumentException($"Barre {date:yyyy-MM-dd} incohérente : plus haut {high} < plus bas {low}.", nameof(high));
-        if (high < open || high < close) throw new ArgumentException($"Barre {date:yyyy-MM-dd} incohérente : plus haut {high} inférieur à l'ouverture {open} ou à la clôture {close}.", nameof(high));
-        if (low > open || low > close) throw new ArgumentException($"Barre {date:yyyy-MM-dd} incohérente : plus bas {low} supérieur à l'ouverture {open} ou à la clôture {close}.", nameof(low));
+        if (open <= 0m)
+        {
+            throw new ArgumentOutOfRangeException(nameof(open), open, "L'ouverture doit être strictement positive.");
+        }
+
+        if (high <= 0m)
+        {
+            throw new ArgumentOutOfRangeException(nameof(high), high, "Le plus haut doit être strictement positif.");
+        }
+
+        if (low <= 0m)
+        {
+            throw new ArgumentOutOfRangeException(nameof(low), low, "Le plus bas doit être strictement positif.");
+        }
+
+        if (close <= 0m)
+        {
+            throw new ArgumentOutOfRangeException(nameof(close), close, "La clôture doit être strictement positive.");
+        }
+
+        if (volume < 0L)
+        {
+            throw new ArgumentOutOfRangeException(nameof(volume), volume, "Le volume ne peut pas être négatif.");
+        }
+
+        if (high < low)
+        {
+            throw new ArgumentException($"Barre {date:yyyy-MM-dd} incohérente : plus haut {high} < plus bas {low}.", nameof(high));
+        }
+
+        if (high < open || high < close)
+        {
+            throw new ArgumentException($"Barre {date:yyyy-MM-dd} incohérente : plus haut {high} inférieur à l'ouverture {open} ou à la clôture {close}.", nameof(high));
+        }
+
+        if (low > open || low > close)
+        {
+            throw new ArgumentException($"Barre {date:yyyy-MM-dd} incohérente : plus bas {low} supérieur à l'ouverture {open} ou à la clôture {close}.", nameof(low));
+        }
 
         Date = date;
         Open = open;

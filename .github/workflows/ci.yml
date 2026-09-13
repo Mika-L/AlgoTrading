@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restaurer
+        run: dotnet restore AlgoTrading.slnx
+
+      - name: Compiler
+        # TreatWarningsAsErrors est actif : un avertissement casse la CI.
+        run: dotnet build AlgoTrading.slnx --no-restore --configuration Release
+
+      - name: Tester
+        run: dotnet test AlgoTrading.slnx --no-build --configuration Release

@@ -12,6 +12,8 @@ namespace AlgoTrading.Architecture.Tests.Boundaries;
 public class ModuleBoundaryTests
 {
     private static readonly Assembly Domain = typeof(AlgoTrading.Domain.MarketData.Symbol).Assembly;
+    private static readonly Assembly Application = typeof(AlgoTrading.Application.Ports.IMarketDataRepository).Assembly;
+    private static readonly Assembly Infrastructure = typeof(AlgoTrading.Infrastructure.Persistence.AlgoTradingDbContext).Assembly;
 
     [Fact]
     public void should_keep_the_domain_free_of_the_file_system_of_ef_and_of_http()
@@ -35,6 +37,54 @@ public class ModuleBoundaryTests
                 "AlgoTrading.Domain.Strategies",
                 "AlgoTrading.Domain.Backtesting",
                 "AlgoTrading.Domain.Reporting")
+            .GetResult();
+
+        result.FailingTypeNames.ShouldBeNull();
+    }
+
+    [Fact]
+    public void should_keep_strategies_from_depending_on_the_engine_or_on_reporting()
+    {
+        var result = Types.InAssembly(Domain)
+            .That().ResideInNamespace("AlgoTrading.Domain.Strategies")
+            .Should()
+            .NotHaveDependencyOnAny("AlgoTrading.Domain.Backtesting", "AlgoTrading.Domain.Reporting")
+            .GetResult();
+
+        result.FailingTypeNames.ShouldBeNull();
+    }
+
+    [Fact]
+    public void should_keep_the_application_layer_free_of_any_infrastructure()
+    {
+        var result = Types.InAssembly(Application)
+            .Should()
+            .NotHaveDependencyOnAny("AlgoTrading.Infrastructure", "Microsoft.EntityFrameworkCore", "ScottPlot", "CsvHelper")
+            .GetResult();
+
+        result.FailingTypeNames.ShouldBeNull();
+    }
+
+    [Fact]
+    public void should_keep_the_engine_from_writing_anywhere()
+    {
+        // Le moteur retourne un résultat ; c'est l'appelant qui le persiste.
+        var result = Types.InAssembly(Domain)
+            .That().ResideInNamespace("AlgoTrading.Domain.Backtesting")
+            .Should()
+            .NotHaveDependencyOnAny("System.IO", "System.Net.Http", "Microsoft.EntityFrameworkCore")
+            .GetResult();
+
+        result.FailingTypeNames.ShouldBeNull();
+    }
+
+    [Fact]
+    public void should_have_infrastructure_implement_the_ports_rather_than_the_reverse()
+    {
+        var result = Types.InAssembly(Infrastructure)
+            .That().ImplementInterface(typeof(AlgoTrading.Application.Ports.IMarketDataProvider))
+            .Should()
+            .BeSealed()
             .GetResult();
 
         result.FailingTypeNames.ShouldBeNull();

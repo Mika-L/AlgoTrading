@@ -47,6 +47,19 @@ public class StrategyDefinitionTests
     }
 
     [Fact]
+    public void should_change_its_fingerprint_even_when_it_has_already_been_read_once()
+    {
+        // Mise en cache dans un champ, l'empreinte serait recopiée par le constructeur de
+        // copie du record : la stratégie dérivée porterait celle de son origine.
+        var one = Sample();
+        var before = one.Fingerprint;
+
+        var other = one with { Entry = one.Entry with { Threshold = 0.9m } };
+
+        other.Fingerprint.ShouldNotBe(before);
+    }
+
+    [Fact]
     public void should_change_its_fingerprint_when_a_threshold_changes()
     {
         var one = Sample();

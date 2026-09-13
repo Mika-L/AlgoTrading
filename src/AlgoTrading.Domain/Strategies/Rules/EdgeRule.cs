@@ -14,9 +14,7 @@ public sealed class EdgeRule : ISignalRule
 {
     public const string Type = "Edge";
 
-    private readonly ISignalRule _inner;
-
-    private EdgeRule(ISignalRule inner) => _inner = inner;
+    private EdgeRule(ISignalRule inner) => Inner = inner;
 
     public static ISignalRule Wrap(ISignalRule rule)
     {
@@ -26,15 +24,15 @@ public sealed class EdgeRule : ISignalRule
         return rule.Kind == SignalKind.Event ? rule : new EdgeRule(rule);
     }
 
-    public ISignalRule Inner => _inner;
+    public ISignalRule Inner { get; }
 
-    public string Name => $"{_inner.Name} (au basculement)";
+    public string Name => $"{Inner.Name} (au basculement)";
 
-    public IndicatorDescriptor Indicator => _inner.Indicator;
+    public IndicatorDescriptor Indicator => Inner.Indicator;
 
     public SignalKind Kind => SignalKind.Event;
 
-    public int WarmupBars => _inner.WarmupBars + 1;
+    public int WarmupBars => Inner.WarmupBars + 1;
 
     public Signal Evaluate(in RuleContext context)
     {
@@ -43,14 +41,14 @@ public sealed class EdgeRule : ISignalRule
             return Signal.None;
         }
 
-        var current = _inner.Evaluate(context);
+        var current = Inner.Evaluate(context);
         if (current.IsNeutral)
         {
             return Signal.None;
         }
 
         var previousContext = context with { BarIndex = context.BarIndex - 1 };
-        var previous = _inner.Evaluate(previousContext);
+        var previous = Inner.Evaluate(previousContext);
 
         return previous.Direction == current.Direction ? Signal.None : current;
     }

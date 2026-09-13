@@ -15,8 +15,6 @@ namespace AlgoTrading.Domain.Strategies;
 /// </summary>
 public sealed record StrategyDefinition
 {
-    private string? _fingerprint;
-
     public StrategyDefinition()
     {
     }
@@ -53,8 +51,13 @@ public sealed record StrategyDefinition
 
     public ExecutionPolicy Execution { get; init; } = new();
 
-    /// <summary>Empreinte SHA-256 de la forme canonique. Identique ⇒ même backtest.</summary>
-    public string Fingerprint => _fingerprint ??= Hash(Canonical());
+    /// <summary>
+    /// Empreinte SHA-256 de la forme canonique. Identique ⇒ même backtest.
+    /// <para>Recalculée à chaque lecture, délibérément : mise en cache dans un champ, elle
+    /// serait recopiée telle quelle par le constructeur de copie d'un <c>record</c>, et une
+    /// stratégie dérivée par <c>with</c> porterait l'empreinte de celle dont elle est issue.</para>
+    /// </summary>
+    public string Fingerprint => Hash(Canonical());
 
     public string ToJson() => JsonSerializer.Serialize(this, StrategyJson.Indented);
 
