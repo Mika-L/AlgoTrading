@@ -274,38 +274,8 @@ public static class Series
         return result;
     }
 
-    /// <summary>Racine carrée d'un <see cref="decimal"/> par Newton-Raphson, amorcée en double.</summary>
-    internal static decimal Sqrt(decimal value)
-    {
-        if (value < 0m)
-        {
-            throw new ArgumentOutOfRangeException(nameof(value), value, "La racine carrée d'un nombre négatif n'est pas définie.");
-        }
-
-        if (value == 0m)
-        {
-            return 0m;
-        }
-
-        var guess = (decimal)Math.Sqrt((double)value);
-        if (guess <= 0m)
-        {
-            guess = value;
-        }
-
-        for (var i = 0; i < 16; i++)
-        {
-            var next = (guess + (value / guess)) / 2m;
-            if (next == guess)
-            {
-                break;
-            }
-
-            guess = next;
-        }
-
-        return guess;
-    }
+    /// <summary>Racine carrée en decimal — voir <see cref="DecimalMath.Sqrt"/>.</summary>
+    internal static decimal Sqrt(decimal value) => DecimalMath.Sqrt(value);
 
     private static decimal[] Extremum(ReadOnlySpan<decimal> source, int period, int sourceFirstValid, out int firstValid, bool highest)
     {
