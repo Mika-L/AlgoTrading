@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Aucune ProjectReference, aucun paquet d'infrastructure : la frontière est tenue
+       par le compilateur. `using Microsoft.EntityFrameworkCore;` ne compilera pas ici. -->
+  <PropertyGroup>
+    <RootNamespace>AlgoTrading.Domain</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AlgoTrading.Domain.Tests" />
+    <InternalsVisibleTo Include="AlgoTrading.Application" />
+  </ItemGroup>
+
+</Project>

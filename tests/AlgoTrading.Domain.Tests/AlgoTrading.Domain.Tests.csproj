@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AlgoTrading.Domain.Tests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/AlgoTrading.Domain/AlgoTrading.Domain.csproj" />
+    <ProjectReference Include="../../src/AlgoTrading.Application/AlgoTrading.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <!-- Différentiel de validation uniquement : jamais référencé en production. -->
+    <PackageReference Include="Skender.Stock.Indicators" />
+  </ItemGroup>
+
+</Project>
