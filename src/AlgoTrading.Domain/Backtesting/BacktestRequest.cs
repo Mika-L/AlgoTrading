@@ -22,4 +22,11 @@ public sealed record BacktestRequest
     public ICostModel? Costs { get; init; }
 
     public ICapitalAllocator Allocator { get; init; } = ProRataAllocator.Instance;
+
+    /// <summary>
+    /// Cache d'indicateurs partagé. L'optimiseur en fournit un seul pour des centaines de
+    /// combinaisons : chaque indicateur distinct n'est alors calculé qu'une fois par titre.
+    /// Laissé nul, le moteur en crée un pour ce seul run.
+    /// </summary>
+    public IndicatorCache? Cache { get; init; }
 }

@@ -37,6 +37,9 @@ public sealed record BacktestResult
 
     public required PerformanceMetrics Metrics { get; init; }
 
+    /// <summary>La stratégie sérialisée, pour que le résultat reste rattachable et rejouable.</summary>
+    public string? StrategyJson { get; init; }
+
     /// <summary>
     /// Réserves méthodologiques attachées au résultat — le biais du survivant d'un univers
     /// figé, par exemple. Mieux vaut les porter avec le chiffre que les oublier à côté.

@@ -1,0 +1,113 @@
+[
+  {
+    "type": "BandBreakout",
+    "indicator": "Bollinger",
+    "parameters": {
+      "period": 20,
+      "multiplier": 2
+    },
+    "meanReverting": true
+  },
+  {
+    "type": "Threshold",
+    "indicator": "Cci",
+    "parameters": {
+      "period": 20
+    },
+    "bullishBelow": -100,
+    "bearishAbove": 100
+  },
+  {
+    "type": "Crossover",
+    "indicator": "Ema",
+    "parameters": {
+      "fast": 9,
+      "slow": 20
+    },
+    "mode": "Cross"
+  },
+  {
+    "type": "IchimokuCloud",
+    "indicator": "Ichimoku",
+    "parameters": {
+      "tenkan": 9,
+      "kijun": 26,
+      "senkouB": 52,
+      "displacement": 26
+    }
+  },
+  {
+    "type": "BandBreakout",
+    "indicator": "Keltner",
+    "parameters": {
+      "period": 20,
+      "multiplier": 1.5
+    },
+    "meanReverting": true
+  },
+  {
+    "type": "Crossover",
+    "indicator": "Macd",
+    "parameters": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9
+    },
+    "fastLine": "value",
+    "slowLine": "signal",
+    "mode": "Relative"
+  },
+  {
+    "type": "Sign",
+    "indicator": "Momentum",
+    "parameters": {
+      "period": 10
+    },
+    "pivot": 0
+  },
+  {
+    "type": "Threshold",
+    "indicator": "Rsi",
+    "parameters": {
+      "period": 14
+    },
+    "bullishBelow": 30,
+    "bearishAbove": 70
+  },
+  {
+    "type": "PriceVsLevel",
+    "indicator": "Sar",
+    "parameters": {
+      "step": 0.02,
+      "maxStep": 0.2
+    },
+    "bullishWhenAbove": true
+  },
+  {
+    "type": "Threshold",
+    "indicator": "Stochastic",
+    "parameters": {
+      "period": 14,
+      "signal": 3
+    },
+    "bullishBelow": 20,
+    "bearishAbove": 80
+  },
+  {
+    "type": "PriceVsLevel",
+    "indicator": "Vwap",
+    "parameters": {
+      "period": 20
+    },
+    "bullishWhenAbove": false
+  },
+  {
+    "type": "Threshold",
+    "indicator": "WilliamsR",
+    "parameters": {
+      "period": 14
+    },
+    "bullishBelow": -80,
+    "bearishAbove": -20
+  }
+]

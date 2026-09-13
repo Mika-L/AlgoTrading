@@ -4,9 +4,6 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>AlgoTrading.Cli</RootNamespace>
     <AssemblyName>algo</AssemblyName>
-    <!-- Dette héritée : le code legacy de ConsoleApp1 est démantelé jusqu'à l'étape 8.
-         Ces NoWarn disparaissent quand Program.cs passe de 509 à ~30 lignes. -->
-    <NoWarn>$(NoWarn);CS0219;CS0618;CS8600;CS8602;CS8604</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,13 +11,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CsvHelper" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="ScottPlot" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="strategies/**" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="rules/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

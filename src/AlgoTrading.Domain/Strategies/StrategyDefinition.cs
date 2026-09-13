@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AlgoTrading.Domain.Strategies;
 
@@ -15,6 +16,29 @@ namespace AlgoTrading.Domain.Strategies;
 public sealed record StrategyDefinition
 {
     private string? _fingerprint;
+
+    public StrategyDefinition()
+    {
+    }
+
+    /// <summary>Voir <see cref="RuleConfig"/> : sans ce constructeur, dimensionnement, risque
+    /// et politique d'exécution reviendraient <c>null</c> d'une désérialisation.</summary>
+    [JsonConstructor]
+    public StrategyDefinition(
+        string name,
+        SignalPolicy entry,
+        SignalPolicy? exit = null,
+        PositionSizing? sizing = null,
+        RiskPolicy? risk = null,
+        ExecutionPolicy? execution = null)
+    {
+        Name = name;
+        Entry = entry;
+        Exit = exit;
+        Sizing = sizing ?? new PositionSizing();
+        Risk = risk ?? RiskPolicy.None;
+        Execution = execution ?? new ExecutionPolicy();
+    }
 
     public required string Name { get; init; }
 

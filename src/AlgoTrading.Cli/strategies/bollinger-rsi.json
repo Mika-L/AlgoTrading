@@ -1,0 +1,40 @@
+{
+  "name": "Bollinger et RSI",
+  "entry": {
+    "mode": "Majority",
+    "threshold": 0.5,
+    "rules": [
+      {
+        "type": "BandBreakout",
+        "indicator": "Bollinger",
+        "parameters": { "period": 20, "multiplier": 2 },
+        "meanReverting": true
+      },
+      {
+        "type": "Threshold",
+        "indicator": "Rsi",
+        "parameters": { "period": 14 },
+        "bullishBelow": 30,
+        "bearishAbove": 70
+      },
+      {
+        "type": "Crossover",
+        "indicator": "Macd",
+        "parameters": { "fast": 12, "slow": 26, "signal": 9 },
+        "fastLine": "value",
+        "slowLine": "signal",
+        "mode": "Relative"
+      }
+    ]
+  },
+  "sizing": { "mode": "EquityFraction", "value": 0.1 },
+  "risk": {},
+  "execution": {
+    "commissionRate": 0.001,
+    "minimumCommission": 1,
+    "slippageRate": 0.0005,
+    "orderValidityDays": 1,
+    "exitMode": "CloseAll",
+    "exitFraction": 1
+  }
+}

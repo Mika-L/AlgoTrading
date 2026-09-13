@@ -42,7 +42,7 @@ public sealed class BacktestEngine
 
         var entry = strategy.Entry.ToAggregator();
         var exit = strategy.Exit?.ToAggregator();
-        var cache = new IndicatorCache(universe);
+        var cache = request.Cache ?? new IndicatorCache(universe);
 
         var entryResults = universe.ToDictionary(
             static s => s.Symbol,
@@ -94,6 +94,7 @@ public sealed class BacktestEngine
             RejectedOrders = rejected,
             OpenPositions = portfolio.Positions,
             Metrics = PerformanceCalculator.Calculate(equityCurve, ledger.Trades, request.InitialCash, ledger.TotalCosts),
+            StrategyJson = strategy.ToJson(),
             Caveats = Caveats(strategy),
         };
     }
