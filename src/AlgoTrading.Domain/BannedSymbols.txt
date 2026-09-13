@@ -1,0 +1,13 @@
+T:System.Console;Le domaine n'écrit pas : la sortie utilisateur passe par IConsoleWriter, le diagnostic par ILogger.
+P:System.DateTime.Now;Le domaine ne lit pas l'horloge : injecter TimeProvider.
+P:System.DateTime.Today;Le domaine ne lit pas l'horloge : injecter TimeProvider.
+P:System.DateTime.UtcNow;Le domaine ne lit pas l'horloge : injecter TimeProvider.
+P:System.DateTimeOffset.Now;Le domaine ne lit pas l'horloge : injecter TimeProvider.
+P:System.DateTimeOffset.UtcNow;Le domaine ne lit pas l'horloge : injecter TimeProvider.
+P:System.DateOnly.MinValue;Une date de marché vient toujours d'une barre ou du calendrier.
+T:System.IO.File;Le domaine ne touche pas au système de fichiers.
+T:System.IO.Directory;Le domaine ne touche pas au système de fichiers.
+T:System.IO.Path;Le domaine ne manipule pas de chemins.
+T:System.Random;Un backtest doit être reproductible : pas d'aléa non amorcé dans le domaine.
+T:System.Environment;Le domaine ne lit ni l'environnement ni les variables de processus.
+T:System.Threading.Thread;Le domaine est pur et synchrone.

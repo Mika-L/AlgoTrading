@@ -11,4 +11,15 @@
     <InternalsVisibleTo Include="AlgoTrading.Application" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Avec TreatWarningsAsErrors, une entrée de ce fichier devient une erreur de
+         compilation : c'est ce qui empêche durablement le retour des 45 Console.*
+         et du File.WriteAllLines au cœur de la boucle de backtest. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <AdditionalFiles Include="BannedSymbols.txt" />
+  </ItemGroup>
+
 </Project>
