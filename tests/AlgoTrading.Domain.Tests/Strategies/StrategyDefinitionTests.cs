@@ -142,6 +142,56 @@ public class StrategyDefinitionTests
     }
 
     [Fact]
+    public void should_survive_a_round_trip_with_its_trailing_stop()
+    {
+        var original = Sample() with
+        {
+            Risk = new RiskPolicy
+            {
+                StopLoss = 0.05m,
+                TrailingRate = 0.1m,
+                TrailingAtr = new TrailingAtrStop { Multiple = 3m, Period = 20 },
+            },
+        };
+
+        var restored = StrategyDefinition.FromJson(original.ToJson());
+
+        restored.Risk.TrailingRate.ShouldBe(0.1m);
+        restored.Risk.TrailingAtr.ShouldNotBeNull();
+        restored.Risk.TrailingAtr!.Multiple.ShouldBe(3m);
+        restored.Risk.TrailingAtr.Period.ShouldBe(20);
+        restored.Fingerprint.ShouldBe(original.Fingerprint);
+    }
+
+    [Fact]
+    public void should_change_its_fingerprint_when_the_trailing_stop_changes()
+    {
+        var one = Sample() with { Risk = new RiskPolicy { TrailingAtr = new TrailingAtrStop { Multiple = 3m } } };
+        var other = one with { Risk = new RiskPolicy { TrailingAtr = new TrailingAtrStop { Multiple = 2m } } };
+
+        other.Fingerprint.ShouldNotBe(one.Fingerprint);
+    }
+
+    [Fact]
+    public void should_tell_a_trailing_fraction_from_a_trailing_multiple()
+    {
+        // Dix pour cent sous le plus haut et trois ATR sous le plus haut ne décrivent pas la
+        // même stratégie, même lorsque les deux niveaux coïncident un jour donné.
+        var fraction = Sample() with { Risk = new RiskPolicy { TrailingRate = 0.1m } };
+        var multiple = Sample() with { Risk = new RiskPolicy { TrailingAtr = new TrailingAtrStop { Multiple = 3m } } };
+
+        fraction.Fingerprint.ShouldNotBe(multiple.Fingerprint);
+    }
+
+    [Fact]
+    public void should_leave_the_fingerprint_of_a_strategy_that_has_no_trailing_stop_alone()
+    {
+        // Le stop suiveur n'entre dans la forme canonique que lorsqu'il existe : les runs
+        // enregistrés avant qu'il soit livré restent comparables à ceux d'aujourd'hui.
+        Sample().Fingerprint.ShouldBe("514467d5edbdedae5a6309ceba67dde0cf5f44c1ec4848f1ac61bba01f2054df");
+    }
+
+    [Fact]
     public void should_charge_a_commission_and_a_slippage_by_default()
     {
         // Un backtest à frais nuls sur quarante titres avec signal quotidien n'est pas une mesure.

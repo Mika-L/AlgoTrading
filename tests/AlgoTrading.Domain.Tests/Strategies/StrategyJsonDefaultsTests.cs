@@ -68,6 +68,68 @@ public class StrategyJsonDefaultsTests
     }
 
     [Fact]
+    public void should_give_a_trailing_stop_the_usual_atr_period_when_it_omits_one()
+    {
+        var suiveur = """
+            {
+              "name": "Suiveur",
+              "entry": {
+                "rules": [
+                  { "type": "Sign", "indicator": "Momentum" }
+                ]
+              },
+              "risk": { "trailingAtr": { "multiple": 3 } }
+            }
+            """;
+
+        var strategy = StrategyDefinition.FromJson(suiveur);
+
+        strategy.Risk.TrailingAtr.ShouldNotBeNull();
+        strategy.Risk.TrailingAtr!.Multiple.ShouldBe(3m);
+        strategy.Risk.TrailingAtr.Period.ShouldBe(TrailingAtrStop.DefaultPeriod);
+        strategy.Risk.IsActive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void should_read_a_trailing_fraction_as_a_fraction()
+    {
+        // Comme tout taux du projet : 0,1 vaut dix pour cent, jamais un dixième de pour cent.
+        var suiveur = """
+            {
+              "name": "Suiveur",
+              "entry": {
+                "rules": [
+                  { "type": "Sign", "indicator": "Momentum" }
+                ]
+              },
+              "risk": { "trailingRate": 0.1 }
+            }
+            """;
+
+        var strategy = StrategyDefinition.FromJson(suiveur);
+
+        strategy.Risk.TrailingRate.ShouldBe(0.1m);
+        strategy.Risk.TrailingAtr.ShouldBeNull();
+        strategy.Risk.HasTrailingStop.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void should_write_a_trailing_stop_without_the_calculation_it_implies()
+    {
+        // Le descripteur d'ATR se déduit de la période : un fichier de stratégie porte une
+        // intention, pas le plan de calcul qui en découle.
+        var strategy = StrategyDefinition.FromJson(Minimal) with
+        {
+            Risk = new RiskPolicy { TrailingAtr = new TrailingAtrStop { Multiple = 3m } },
+        };
+
+        var json = strategy.ToJson();
+
+        json.ShouldContain("trailingAtr");
+        json.ShouldNotContain("Atr(period");
+    }
+
+    [Fact]
     public void should_still_honour_a_setting_that_is_written_down()
     {
         var explicitCosts = """

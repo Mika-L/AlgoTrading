@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using AlgoTrading.Domain.Indicators;
+using AlgoTrading.Domain.Indicators.Catalog;
 
 namespace AlgoTrading.Domain.Strategies;
 
@@ -68,10 +70,54 @@ public sealed record PositionSizing
 }
 
 /// <summary>
-/// Stop de protection et prise de bénéfice, exprimés en <b>fractions</b> du prix de revient
-/// (<c>0,02</c> = 2 %).
+/// Stop suiveur à <see cref="Multiple"/> fois l'ATR sous le plus haut atteint depuis l'entrée.
+/// <para>Là où le stop fixe se mesure au prix de revient et ne bouge jamais, celui-ci monte
+/// avec le titre et ne redescend pas : c'est un cliquet, pas une bande. Une volatilité qui
+/// s'élargit le laisse sur place plutôt que de le faire reculer.</para>
+/// <para>La distance s'exprime en multiples d'ATR et non en pourcentage : elle se règle donc
+/// sur l'amplitude propre du titre, et non sur une tolérance uniforme qui serre trop les
+/// valeurs agitées et laisse filer les valeurs calmes.</para>
+/// </summary>
+public sealed record TrailingAtrStop
+{
+    public const int DefaultPeriod = 14;
+
+    public TrailingAtrStop()
+    {
+    }
+
+    /// <summary>Voir <see cref="RuleConfig"/> : sans ce constructeur, une période absente du
+    /// JSON vaudrait zéro et la validation rejetterait un fichier pourtant légitime.</summary>
+    [JsonConstructor]
+    public TrailingAtrStop(decimal multiple, int period = DefaultPeriod)
+    {
+        Multiple = multiple;
+        Period = period;
+    }
+
+    /// <summary>Distance au plus haut, en multiples d'ATR — trois est l'usage courant.</summary>
+    public decimal Multiple { get; init; }
+
+    public int Period { get; init; } = DefaultPeriod;
+
+    /// <summary>
+    /// Identité du calcul d'ATR dont le moteur a besoin. Dérivée, donc jamais sérialisée :
+    /// un fichier de stratégie décrit une intention, pas le plan de calcul qui en découle.
+    /// </summary>
+    [JsonIgnore]
+    public IndicatorDescriptor Atr => IndicatorDescriptor.Of(AverageTrueRange.Kind, ("period", Period));
+}
+
+/// <summary>
+/// Stop de protection, prise de bénéfice et stops suiveurs.
+/// <para>Tout ce qui se compte en <c>Rate</c> ou en fraction se lit de la même façon dans ce
+/// projet : <c>0,02</c> vaut 2 %. <see cref="StopLoss"/> et <see cref="TakeProfit"/> se
+/// mesurent au prix de revient, <see cref="TrailingRate"/> au plus haut atteint depuis
+/// l'entrée, <see cref="TrailingAtr"/> à ce même plus haut mais en multiples d'ATR.</para>
 /// <para>Livrés et testés mais <b>inactifs par défaut</b> : décision arbitrée, pour que le
 /// premier backtest après refactor reste comparable à l'ancien.</para>
+/// <para>Rien n'interdit de les cumuler : le moteur retient à chaque séance le plus
+/// protecteur des stops configurés.</para>
 /// </summary>
 public sealed record RiskPolicy
 {
@@ -79,7 +125,20 @@ public sealed record RiskPolicy
 
     public decimal? TakeProfit { get; init; }
 
-    public bool IsActive => StopLoss.HasValue || TakeProfit.HasValue;
+    /// <summary>
+    /// Stop suiveur à distance constante : <c>0,10</c> le tient dix pour cent sous le plus
+    /// haut atteint depuis l'entrée. La tolérance est la même quel que soit le titre, agité
+    /// ou tranquille — c'est sa force et sa faiblesse, là où <see cref="TrailingAtr"/> se
+    /// règle sur l'amplitude propre de chacun.
+    /// </summary>
+    public decimal? TrailingRate { get; init; }
+
+    /// <summary>Absent, aucun stop suiveur en multiples d'ATR.</summary>
+    public TrailingAtrStop? TrailingAtr { get; init; }
+
+    public bool IsActive => StopLoss.HasValue || TakeProfit.HasValue || HasTrailingStop;
+
+    public bool HasTrailingStop => TrailingRate.HasValue || TrailingAtr is not null;
 
     public static RiskPolicy None { get; } = new();
 }

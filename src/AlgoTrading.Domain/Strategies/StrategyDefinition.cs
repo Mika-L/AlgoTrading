@@ -107,6 +107,24 @@ public sealed record StrategyDefinition
         {
             throw new InvalidOperationException("Une prise de bénéfice est une fraction strictement positive.");
         }
+
+        if (Risk.TrailingRate is <= 0m or > 1m)
+        {
+            throw new InvalidOperationException("Un stop suiveur en fraction se tient strictement entre 0 et 1.");
+        }
+
+        if (Risk.TrailingAtr is { } trailing)
+        {
+            if (trailing.Multiple <= 0m)
+            {
+                throw new InvalidOperationException("Un stop suiveur se mesure en multiples d'ATR strictement positifs.");
+            }
+
+            if (trailing.Period <= 0)
+            {
+                throw new InvalidOperationException("La période d'ATR d'un stop suiveur doit être strictement positive.");
+            }
+        }
     }
 
     /// <summary>
@@ -126,6 +144,20 @@ public sealed record StrategyDefinition
 
         builder.Append(CultureInfo.InvariantCulture, $"sizing={Sizing.Mode}:{Sizing.Value}\n");
         builder.Append(CultureInfo.InvariantCulture, $"risk={Risk.StopLoss?.ToString(CultureInfo.InvariantCulture) ?? "-"}:{Risk.TakeProfit?.ToString(CultureInfo.InvariantCulture) ?? "-"}\n");
+
+        // Lignes ajoutées seulement quand ces stops existent : les stratégies qui s'en passent
+        // gardent l'empreinte qu'elles avaient avant qu'ils soient livrés, et leurs runs déjà
+        // enregistrés restent comparables aux nouveaux.
+        if (Risk.TrailingRate is { } trailingRate)
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"risk.trailingRate={trailingRate}\n");
+        }
+
+        if (Risk.TrailingAtr is { } trailing)
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"risk.trailingAtr={trailing.Multiple}:{trailing.Period}\n");
+        }
+
         builder.Append(CultureInfo.InvariantCulture,
             $"execution={Execution.CommissionRate}:{Execution.MinimumCommission}:{Execution.SlippageRate}:{Execution.OrderValidityDays}:{Execution.ExitMode}:{Execution.ExitFraction}\n");
 

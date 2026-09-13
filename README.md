@@ -103,6 +103,36 @@ Ce qui n'est pas écrit prend sa valeur par défaut : frais à 10 points de base
 d'un euro, glissement à 5 points de base, dimensionnement à 10 % de la valeur du portefeuille,
 aucun stop de protection.
 
+## Protéger une position
+
+```json
+"risk": {
+  "stopLoss": 0.05,
+  "takeProfit": 0.15,
+  "trailingRate": 0.1,
+  "trailingAtr": { "multiple": 3, "period": 14 }
+}
+```
+
+`stopLoss` et `takeProfit` se mesurent au prix de revient. Les deux stops suiveurs se mesurent
+au **plus haut atteint depuis l'entrée** et **ne redescendent jamais** : `trailingRate` à
+distance constante — `0.1` le tient dix pour cent sous ce plus haut —, `trailingAtr` à
+`multiple` fois l'ATR, c'est-à-dire à une distance qui suit l'amplitude propre du titre. Sur le
+CAC 40, trois ATR valent 4 % sur une valeur tranquille et 8 % sur une valeur agitée ; en mars
+2020, vingt. Le premier réglage traite tous les titres pareil, le second s'ajuste à chacun mais
+s'élargit quand le marché s'affole : ce sont deux biais opposés, pas un meilleur et un moins bon.
+
+Les quatre réglages sont facultatifs et se cumulent : à chaque séance, c'est le plus protecteur
+des stops configurés qui parle, et les stops priment sur la prise de bénéfice.
+
+Tout cela se joue **en séance**, sur le plus bas et le plus haut du jour même — un stop différé
+au lendemain ne veut rien dire — et solde la position entière. Un cours qui ouvre déjà au-delà
+du seuil sort à l'ouverture, jamais au seuil. Le niveau opposé à une séance est arrêté à la
+clôture de la veille, ATR compris : le stop ne connaît pas la séance qu'il juge.
+
+Une sortie porte son motif dans le relevé de trades : `Signal`, `StopLoss`, `TakeProfit` ou
+`TrailingStop`.
+
 ## Qualité des données
 
 `algo data gaps` signale deux choses : les séances manquantes, et les **ruptures de cours** —

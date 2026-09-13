@@ -52,6 +52,15 @@ public sealed class BacktestEngine
             ? []
             : universe.ToDictionary(static s => s.Symbol, s => cache.ResultsFor(s.Symbol, exit.Indicators));
 
+        // L'ATR d'un stop suiveur passe par le même cache que les indicateurs de signal : sur
+        // une combinaison qui s'en sert déjà, il n'est pas calculé deux fois. Un stop suiveur
+        // en fraction, lui, ne demande aucun calcul.
+        var trailingAtr = strategy.Risk.TrailingAtr is { } trailing
+            ? universe.ToDictionary(static s => s.Symbol, s => cache.Get(s.Symbol, trailing.Atr))
+            : [];
+
+        var stops = strategy.Risk.HasTrailingStop ? new TrailingStopBook(strategy.Risk, trailingAtr) : null;
+
         var portfolio = new Portfolio(request.InitialCash);
         var ledger = new TradeLedger();
         var equityCurve = new List<EquityPoint>(calendar.Count);
@@ -69,7 +78,7 @@ public sealed class BacktestEngine
             AdvanceCursors(universe, cursors, marks, date);
 
             pending = ExecutePending(pending, universe, cursors, date, strategy, costs, portfolio, ledger, rejected);
-            ApplyRisk(universe, cursors, date, strategy, costs, portfolio, ledger);
+            ApplyRisk(universe, cursors, date, strategy, costs, portfolio, ledger, stops);
 
             var equity = portfolio.Equity(marks);
             equityCurve.Add(new EquityPoint(date, equity, portfolio.Cash, equity - portfolio.Cash));
@@ -190,9 +199,10 @@ public sealed class BacktestEngine
     }
 
     /// <summary>
-    /// Phase 2 — stop et prise de bénéfice se jouent sur le plus bas et le plus haut de la
+    /// Phase 2 — stops et prise de bénéfice se jouent sur le plus bas et le plus haut de la
     /// séance, donc <b>le jour même</b> : un stop à 2 % différé au lendemain ne veut rien dire.
-    /// Un gap d'ouverture au-delà du seuil exécute à l'ouverture. Le stop prime.
+    /// Un gap d'ouverture au-delà du seuil exécute à l'ouverture. Les stops priment sur la
+    /// prise de bénéfice, et des deux stops c'est le plus haut — le plus protecteur — qui vaut.
     /// </summary>
     private static void ApplyRisk(
         BarSeries[] universe,
@@ -201,9 +211,17 @@ public sealed class BacktestEngine
         StrategyDefinition strategy,
         ICostModel costs,
         Portfolio portfolio,
-        TradeLedger ledger)
+        TradeLedger ledger,
+        TrailingStopBook? stops)
     {
-        if (!strategy.Risk.IsActive || portfolio.Positions.Count == 0)
+        if (!strategy.Risk.IsActive)
+        {
+            return;
+        }
+
+        stops?.Retain(portfolio.Positions);
+
+        if (portfolio.Positions.Count == 0)
         {
             return;
         }
@@ -221,31 +239,40 @@ public sealed class BacktestEngine
             var series = universe[index];
             var entryPrice = position.AveragePrice;
 
-            decimal? trigger = null;
+            decimal? protection = strategy.Risk.StopLoss is { } stop ? entryPrice * (1m - stop) : null;
             var reason = ExecutionReason.StopLoss;
 
-            if (strategy.Risk.StopLoss is { } stop)
+            // À égalité, c'est le stop fixe qui nomme la sortie : il était là le premier. La
+            // comparaison passe par un plancher car `trail > null` vaudrait faux, et le stop
+            // suiveur ne servirait jamais aux stratégies qui n'ont que lui.
+            if (stops?.LevelFor(symbol, entryPrice, bar) is { } trail && trail > (protection ?? decimal.MinValue))
             {
-                var level = entryPrice * (1m - stop);
-                if (series.Low[bar] <= level)
-                {
-                    // Une ouverture déjà sous le seuil s'exécute à l'ouverture, pas au seuil.
-                    trigger = Math.Min(level, series.Open[bar]);
-                }
+                protection = trail;
+                reason = ExecutionReason.TrailingStop;
+            }
+
+            decimal? trigger = null;
+
+            if (protection is { } level && series.Low[bar] <= level)
+            {
+                // Une ouverture déjà sous le seuil s'exécute à l'ouverture, pas au seuil.
+                trigger = Math.Min(level, series.Open[bar]);
             }
 
             if (trigger is null && strategy.Risk.TakeProfit is { } target)
             {
-                var level = entryPrice * (1m + target);
-                if (series.High[bar] >= level)
+                var objective = entryPrice * (1m + target);
+                if (series.High[bar] >= objective)
                 {
-                    trigger = Math.Max(level, series.Open[bar]);
+                    trigger = Math.Max(objective, series.Open[bar]);
                     reason = ExecutionReason.TakeProfit;
                 }
             }
 
             if (trigger is not { } raw)
             {
+                // La position passe la séance : son cliquet monte avec le plus haut du jour.
+                stops?.Advance(symbol, series.High[bar], bar);
                 continue;
             }
 
@@ -254,6 +281,7 @@ public sealed class BacktestEngine
 
             portfolio.Apply(execution);
             ledger.Record(execution);
+            stops?.Forget(symbol);
         }
     }
 

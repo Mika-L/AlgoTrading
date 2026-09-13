@@ -14,6 +14,9 @@ public enum ExecutionReason
     Signal,
     StopLoss,
     TakeProfit,
+
+    /// <summary>Stop suiveur : le titre est redescendu sous le cliquet posé par sa hausse.</summary>
+    TrailingStop,
 }
 
 public enum RejectionReason
