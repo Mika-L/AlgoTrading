@@ -178,9 +178,11 @@ public static class Series
         Extremum(source, period, sourceFirstValid, out firstValid, highest: false);
 
     /// <summary>
-    /// True range de Wilder. La première barre vaut <c>High - Low</c>, faute de clôture
-    /// précédente — c'est la convention de <i>New Concepts in Technical Trading Systems</i>,
-    /// celle qui permet d'amorcer l'ATR sur les 14 premières valeurs.
+    /// True range de Wilder : la plus grande des trois amplitudes — la séance, le gap haussier
+    /// et le gap baissier face à la clôture précédente.
+    /// <para>La première barre n'a <b>pas</b> de true range : il lui manque une clôture
+    /// précédente. <c>firstValid</c> vaut donc 1, conformément à <i>New Concepts in Technical
+    /// Trading Systems</i> — c'est ce qui fait tomber le premier ATR 14 sur la 15ᵉ barre.</para>
     /// </summary>
     public static decimal[] TrueRange(ReadOnlySpan<decimal> high, ReadOnlySpan<decimal> low, ReadOnlySpan<decimal> close, out int firstValid)
     {
@@ -196,8 +198,7 @@ public static class Series
             return result;
         }
 
-        firstValid = 0;
-        result[0] = high[0] - low[0];
+        firstValid = Math.Min(1, high.Length);
 
         for (var i = 1; i < high.Length; i++)
         {

@@ -148,8 +148,8 @@ public class SeriesTests
 
         var trueRange = Series.TrueRange(high, low, close, out var firstValid);
 
-        firstValid.ShouldBe(0);
-        trueRange[0].ShouldBe(2m);   // faute de clôture précédente : plus haut - plus bas
+        // La première séance n'a pas de true range : il lui manque une clôture précédente.
+        firstValid.ShouldBe(1);
         trueRange[1].ShouldBe(9m);   // |20 - 11| domine l'amplitude du jour (2)
     }
 
