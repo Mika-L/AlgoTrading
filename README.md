@@ -41,7 +41,7 @@ fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n
 | `algo data list` | Instruments connus et étendue de leur historique. |
 | `algo data gaps` | Séances manquantes et **ruptures de cours**. |
 | `algo backtest run --strategy <fichier>` | Exécute une stratégie (`--save`, `--from`, `--to`, `--cash`). |
-| `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`). |
+| `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`, `--min-trades`, `--sample`, `--seed`). |
 | `algo backtest compare --runs 12,17` | Compare des résultats enregistrés. |
 | `algo report show --run <n>` | Affiche un résultat. |
 | `algo report chart --run <n>` | Rejoue un run et exporte CSV et graphique. |
@@ -50,6 +50,41 @@ Options globales : `--config <fichier>`, `--db <chemin>`, `--verbosity quiet|err
 
 La journalisation de diagnostic et la sortie utilisateur sont séparées : `--verbosity quiet`
 fait taire les traces sans masquer les résultats.
+
+## Explorer des stratégies
+
+Dans un catalogue de règles, toute valeur peut être remplacée par une liste ou une plage, et
+chaque entrée se développe en autant de variantes que le produit de ses axes :
+
+```json
+{
+  "type": "Threshold",
+  "indicator": "Rsi",
+  "parameters": { "period": { "from": 7, "to": 28, "step": 7 } },
+  "bullishBelow": [20, 25, 30, 35],
+  "bearishAbove": [65, 70, 75, 80]
+}
+```
+
+Les variantes qu'une règle refuse (un seuil de survente au-dessus du seuil de surachat) sont
+écartées et comptées. `rules/screening.json` décline ainsi les douze indicateurs en 152 règles.
+
+L'optimiseur travaille en flux : combinaisons générées à la volée, résultats réduits à leurs
+mesures, classement borné à `--top`. La mémoire ne dépend plus du nombre d'essais. Il combine
+au plus une variante par indicateur (`--allow-same-indicator` pour lever la contrainte), ne
+classe que les combinaisons d'au moins `--min-trades` trades (20 par défaut), et `--sample <n>`
+tire `n` combinaisons uniformément, sans remise et de façon reproductible (`--seed`), au lieu de
+tout parcourir. Une combinaison coûte environ 0,25 s de CPU sur le CAC 40 complet.
+
+```bash
+# Criblage : chaque variante seule, pour repérer les plateaux de paramètres
+algo backtest optimize --rules rules/screening.json --min-k 1 --max-k 1 --top 50
+# Combinaison : 20 000 tirages parmi les combinaisons de 2 à 4 règles
+algo backtest optimize --rules rules/screening.json --sample 20000
+```
+
+Le rapport donne le nombre de combinaisons réellement essayées. Il faudra en tenir compte pour
+corriger le meilleur score de la chance accumulée au fil des essais.
 
 ## Architecture
 

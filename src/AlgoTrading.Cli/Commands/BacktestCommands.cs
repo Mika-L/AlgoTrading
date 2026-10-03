@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Globalization;
 using AlgoTrading.Application.Ports;
 using AlgoTrading.Application.UseCases;
+using AlgoTrading.Domain.Backtesting;
 using AlgoTrading.Domain.Reporting;
 using AlgoTrading.Domain.Strategies;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,10 +76,14 @@ public static class BacktestCommands
 
     private static Command Optimize(IServiceProvider services)
     {
-        var rules = new Option<FileInfo?>("--rules") { Description = "Catalogue de règles ; par défaut, les douze indicateurs directionnels." };
+        var rules = new Option<FileInfo?>("--rules") { Description = "Catalogue de règles, plages comprises ; par défaut, les douze indicateurs directionnels." };
         var minK = new Option<int>("--min-k") { Description = "Nombre minimal de règles par combinaison.", DefaultValueFactory = _ => 2 };
         var maxK = new Option<int>("--max-k") { Description = "Nombre maximal de règles par combinaison.", DefaultValueFactory = _ => 4 };
         var top = new Option<int>("--top") { Description = "Nombre de combinaisons à afficher.", DefaultValueFactory = _ => 20 };
+        var minTrades = new Option<int>("--min-trades") { Description = "Nombre minimal de trades pour être classée.", DefaultValueFactory = _ => 20 };
+        var sample = new Option<long?>("--sample") { Description = "Tire au hasard ce nombre de combinaisons au lieu de toutes les essayer." };
+        var seed = new Option<ulong>("--seed") { Description = "Graine du tirage aléatoire.", DefaultValueFactory = _ => 1UL };
+        var allowVariants = new Option<bool>("--allow-same-indicator") { Description = "Autorise deux variantes d'un même indicateur dans une combinaison." };
         var parallel = new Option<bool>("--parallel") { Description = "Répartit l'exploration sur tous les cœurs.", DefaultValueFactory = _ => true };
         var from = new Option<DateOnly?>("--from") { Description = "Première séance." };
         var to = new Option<DateOnly?>("--to") { Description = "Dernière séance." };
@@ -86,7 +91,7 @@ public static class BacktestCommands
         var save = new Option<bool>("--save") { Description = "Persiste les combinaisons retenues." };
 
         var command = new Command("optimize", "Explore les combinaisons de règles et les classe.");
-        foreach (var option in new Option[] { rules, minK, maxK, top, parallel, from, to, cash, save })
+        foreach (var option in new Option[] { rules, minK, maxK, top, minTrades, sample, seed, allowVariants, parallel, from, to, cash, save })
         {
             command.Add(option);
         }
@@ -95,26 +100,60 @@ public static class BacktestCommands
         {
             var output = services.GetRequiredService<IConsoleWriter>();
 
-            var catalog = parse.GetValue(rules) is { Exists: true } file
-                ? RuleCatalogFile.Read(await File.ReadAllTextAsync(file.FullName, cancellationToken).ConfigureAwait(false))
-                : RuleRegistry.DefaultCatalog();
+            IReadOnlyList<RuleConfig> catalog = RuleRegistry.DefaultCatalog();
 
-            var response = await services.GetRequiredService<OptimizeStrategyHandler>().HandleAsync(new OptimizeStrategyRequest
+            if (parse.GetValue(rules) is { } file)
             {
-                Catalog = catalog,
-                MinimumRules = parse.GetValue(minK),
-                MaximumRules = parse.GetValue(maxK),
-                Top = parse.GetValue(top),
-                From = parse.GetValue(from),
-                To = parse.GetValue(to),
-                InitialCash = parse.GetValue(cash),
-                Parallel = parse.GetValue(parallel),
-                Save = parse.GetValue(save),
-            }, cancellationToken).ConfigureAwait(false);
+                if (!file.Exists)
+                {
+                    output.WriteWarning($"Catalogue introuvable : {file.FullName}");
+                    return 1;
+                }
 
-            if (response.Outcomes.Count == 0)
+                var expanded = RuleCatalog.Parse(await File.ReadAllTextAsync(file.FullName, cancellationToken).ConfigureAwait(false));
+                catalog = expanded.Rules;
+
+                output.WriteLine(expanded.Discarded == 0
+                    ? $"Catalogue : {expanded.Rules.Count} règles."
+                    : $"Catalogue : {expanded.Rules.Count} règles, {expanded.Discarded} variantes invalides écartées.");
+            }
+
+            var response = await services.GetRequiredService<OptimizeStrategyHandler>().HandleAsync(
+                new OptimizeStrategyRequest
+                {
+                    Catalog = catalog,
+                    MinimumRules = parse.GetValue(minK),
+                    MaximumRules = parse.GetValue(maxK),
+                    Top = parse.GetValue(top),
+                    MinimumTrades = parse.GetValue(minTrades),
+                    SampleSize = parse.GetValue(sample),
+                    Seed = parse.GetValue(seed),
+                    OneVariantPerIndicator = !parse.GetValue(allowVariants),
+                    From = parse.GetValue(from),
+                    To = parse.GetValue(to),
+                    InitialCash = parse.GetValue(cash),
+                    Parallel = parse.GetValue(parallel),
+                    Save = parse.GetValue(save),
+                },
+                new ConsoleProgress(output),
+                cancellationToken).ConfigureAwait(false);
+
+            var report = response.Report;
+            output.WriteLine();
+
+            if (report.Evaluated == 0)
             {
                 output.WriteLine("Aucune combinaison à évaluer avec ces bornes.");
+                return 0;
+            }
+
+            output.WriteLine(report.Evaluated < report.SearchSpace
+                ? $"{report.Evaluated:N0} combinaisons tirées sur {report.SearchSpace:N0} possibles, {report.Eligible:N0} avec au moins {parse.GetValue(minTrades)} trades."
+                : $"{report.Evaluated:N0} combinaisons essayées, {report.Eligible:N0} avec au moins {parse.GetValue(minTrades)} trades.");
+
+            if (report.Top.Count == 0)
+            {
+                output.WriteLine("Aucune n'atteint le nombre minimal de trades.");
                 return 0;
             }
 
@@ -122,16 +161,17 @@ public static class BacktestCommands
             output.WriteLine();
 
             output.WriteTable(
-                ["Rang", "Combinaison", "Calmar", "Rendement", "Pire baisse", "Trades"],
+                ["Rang", "Combinaison", "Calmar", "Sharpe", "Rendement", "Pire baisse", "Trades"],
                 [
-                    .. response.Outcomes.Select((o, i) => new[]
+                    .. report.Top.Select((c, i) => new[]
                     {
                         (i + 1).ToString(CultureInfo.CurrentCulture),
-                        o.Strategy.Name,
-                        o.Score.ToString("0.00", CultureInfo.CurrentCulture),
-                        ConsoleWriter.Percent(o.Result.Metrics.TotalReturn),
-                        ConsoleWriter.Percent(o.Result.Metrics.MaxDrawdown),
-                        o.Result.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
+                        c.Strategy.Name,
+                        c.Score.ToString("0.00", CultureInfo.CurrentCulture),
+                        c.Metrics.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+                        ConsoleWriter.Percent(c.Metrics.TotalReturn),
+                        ConsoleWriter.Percent(c.Metrics.MaxDrawdown),
+                        c.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
                     }),
                 ]);
 
@@ -145,6 +185,35 @@ public static class BacktestCommands
         });
 
         return command;
+    }
+
+    /// <summary>
+    /// Progression réécrite sur une seule ligne. Les rapports arrivent des fils de l'exploration
+    /// parallèle, d'où le verrou ; <see cref="Progress{T}"/> ne convient pas, il les livrerait
+    /// dans le désordre.
+    /// </summary>
+    private sealed class ConsoleProgress(IConsoleWriter output) : IProgress<OptimizationProgress>
+    {
+        private readonly Lock _gate = new();
+        private long _shown;
+
+        public void Report(OptimizationProgress value)
+        {
+            lock (_gate)
+            {
+                if (value.Evaluated <= _shown)
+                {
+                    return;
+                }
+
+                _shown = value.Evaluated;
+                var best = value.Best is { } candidate
+                    ? $" — meilleur Calmar {candidate.Score.ToString("0.00", CultureInfo.CurrentCulture)}"
+                    : string.Empty;
+
+                output.Write($"\r{value.Evaluated:N0} / {value.Planned:N0} ({(double)value.Evaluated / value.Planned:P0}){best}   ");
+            }
+        }
     }
 
     private static Command Compare(IServiceProvider services)
