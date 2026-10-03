@@ -1,0 +1,93 @@
+@inject IndicatorLineCatalog Catalog
+
+<div class="fields" style="margin-bottom:14px">
+    <label class="field">
+        <span>Agrégation des voix</span>
+        <select @bind="Policy.Mode" @bind:after="Changed">
+            @foreach (var mode in Enum.GetValues<AggregationMode>())
+            {
+                <option value="@mode">@Labels.Aggregation(mode)</option>
+            }
+        </select>
+    </label>
+
+    @if (Policy.Mode is AggregationMode.Majority or AggregationMode.Weighted)
+    {
+        <label class="field">
+            <span>Seuil à dépasser</span>
+            <div class="suffix" data-suffix="%">
+                <input type="number" step="any" min="0" max="100" @bind="Policy.ThresholdPercent" @bind:after="Changed" />
+            </div>
+            <small>Strictement : 2 voix sur 4 ne font pas 50 %.</small>
+        </label>
+    }
+</div>
+
+<div class="stack">
+    @for (var i = 0; i < Policy.Rules.Count; i++)
+    {
+        var index = i;
+        <RuleEditor @key="Policy.Rules[index]" Rule="Policy.Rules[index]" Index="index" IsLast="index == Policy.Rules.Count - 1"
+                    ShowWeight="Policy.Mode == AggregationMode.Weighted"
+                    OnChanged="Changed" OnRemove="() => Remove(index)" OnMove="delta => Move(index, delta)" />
+    }
+
+    @if (Policy.Rules.Count == 0)
+    {
+        <div class="empty">Aucune règle.</div>
+    }
+
+    <div class="row">
+        <select @key="_adder" value="" @onchange="Add" style="width:auto" aria-label="Ajouter une règle">
+            <option value="" disabled>+ Ajouter une règle sur…</option>
+            @foreach (var indicator in Catalog.Indicators)
+            {
+                <option value="@indicator.Kind">@indicator.Kind</option>
+            }
+        </select>
+        <span class="muted">Chaque indicateur arrive avec sa règle habituelle, à ajuster.</span>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public SignalPolicyForm Policy { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    // Change à chaque ajout : la liste déroulante est recréée et revient à son invite.
+    private int _adder;
+
+    private Task Changed() => OnChanged.InvokeAsync();
+
+    private Task Add(ChangeEventArgs e)
+    {
+        _adder++;
+
+        if (Catalog.Find(e.Value?.ToString() ?? string.Empty) is { } indicator)
+        {
+            Policy.Rules.Add(RuleForm.For(indicator));
+        }
+
+        return Changed();
+    }
+
+    private Task Remove(int index)
+    {
+        Policy.Rules.RemoveAt(index);
+        return Changed();
+    }
+
+    private Task Move(int index, int delta)
+    {
+        var target = index + delta;
+
+        if (target >= 0 && target < Policy.Rules.Count)
+        {
+            (Policy.Rules[index], Policy.Rules[target]) = (Policy.Rules[target], Policy.Rules[index]);
+        }
+
+        return Changed();
+    }
+}

@@ -1,0 +1,173 @@
+@page "/data"
+@inject IMarketDataRepository MarketData
+@inject IUniverseCatalog Universes
+@inject FetchMarketDataHandler Fetcher
+
+<PageTitle>Données · AlgoTrading</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Données</h1>
+        <p class="muted">Historique de marché en base, et ruptures de cours à écarter par <code>Universes:Exclusions</code>.</p>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Télécharger un univers</h2>
+    <div class="row" style="align-items:flex-end">
+        <label class="field" style="width:160px">
+            <span>Univers</span>
+            <select @bind="_universe">
+                @foreach (var name in Universes.Names)
+                {
+                    <option value="@name">@name</option>
+                }
+            </select>
+        </label>
+        <label class="field" style="width:160px">
+            <span>Depuis</span>
+            <input type="date" @bind="_from" />
+        </label>
+        <label class="field" style="width:140px">
+            <span>Source</span>
+            <select @bind="_provider">
+                <option value="yahoo">Yahoo</option>
+                <option value="csv">CSV</option>
+            </select>
+        </label>
+        <button class="btn primary" disabled="@_fetching" @onclick="Fetch">
+            @if (_fetching)
+            {
+                <span class="spinner"></span>
+            }
+            Télécharger
+        </button>
+    </div>
+
+    @if (_fetchResult is { } result)
+    {
+        <div class="notice @(result.Failures.Count == 0 ? "ok" : "warn")" style="margin-top:12px">
+            @result.InstrumentsFetched titres mis à jour, @result.BarsSaved séances ajoutées.
+            @if (result.Failures.Count > 0)
+            {
+                <ul>
+                    @foreach (var failure in result.Failures)
+                    {
+                        <li>@failure</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+
+    @if (_fetchError is not null)
+    {
+        <div class="notice error" style="margin-top:12px">@_fetchError</div>
+    }
+</div>
+
+@if (_discontinuities is { Count: > 0 })
+{
+    <div class="card">
+        <div class="card-header">
+            <h2>Ruptures de cours</h2>
+            <span class="muted">Une opération sur titre non répercutée fabrique une plus-value fictive.</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Titre</th><th>Séance</th><th class="num">Clôture veille</th><th class="num">Clôture</th><th class="num">Rapport</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var gap in _discontinuities)
+                    {
+                        <tr>
+                            <td>@gap.Symbol</td>
+                            <td>@Labels.Date(gap.Date)</td>
+                            <td class="num">@Labels.Number(gap.PreviousClose)</td>
+                            <td class="num">@Labels.Number(gap.Close)</td>
+                            <td class="num">× @Labels.Number(gap.Ratio)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<div class="card" style="padding:0">
+    @if (_instruments is null)
+    {
+        <div class="empty"><span class="spinner"></span></div>
+    }
+    else if (_instruments.Count == 0)
+    {
+        <div class="empty">Aucun instrument en base.</div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Titre</th><th>Nom</th><th class="num">Séances</th><th>Première</th><th>Dernière</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var instrument in _instruments)
+                    {
+                        <tr>
+                            <td>@instrument.Symbol</td>
+                            <td class="secondary">@instrument.Name</td>
+                            <td class="num">@instrument.BarCount.ToString("N0", CultureInfo.CurrentCulture)</td>
+                            <td>@(instrument.FirstBar is { } first ? Labels.Date(first) : "—")</td>
+                            <td>@(instrument.LastBar is { } last ? Labels.Date(last) : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<Instrument>? _instruments;
+    private IReadOnlyList<PriceDiscontinuity>? _discontinuities;
+    private string _universe = string.Empty;
+    private DateOnly _from = new(2017, 1, 1);
+    private string _provider = "yahoo";
+    private bool _fetching;
+    private FetchMarketDataResult? _fetchResult;
+    private string? _fetchError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _universe = Universes.Names.FirstOrDefault() ?? string.Empty;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _instruments = await MarketData.ListInstrumentsAsync();
+        _discontinuities = await MarketData.FindDiscontinuitiesAsync();
+    }
+
+    private async Task Fetch()
+    {
+        _fetching = true;
+        _fetchResult = null;
+        _fetchError = null;
+
+        try
+        {
+            _fetchResult = await Fetcher.HandleAsync(new FetchMarketDataRequest { Universe = _universe, From = _from, Provider = _provider });
+            await Reload();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _fetchError = exception.Message;
+        }
+        finally
+        {
+            _fetching = false;
+        }
+    }
+}

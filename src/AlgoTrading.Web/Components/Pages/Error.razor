@@ -1,0 +1,23 @@
+@page "/Error"
+@using System.Diagnostics
+@attribute [ExcludeFromInteractiveRouting]
+
+<PageTitle>Erreur</PageTitle>
+
+<h1>Erreur</h1>
+<p class="muted">La requête n'a pas pu aboutir.</p>
+
+@if (RequestId is not null)
+{
+    <p class="muted">Identifiant de requête : <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <nav class="sidebar">
+        <a class="brand" href="">AlgoTrading</a>
+        <NavLink class="nav-link" href="" Match="NavLinkMatch.All">Backtests</NavLink>
+        <NavLink class="nav-link" href="strategies">Stratégies</NavLink>
+        <NavLink class="nav-link" href="data">Données</NavLink>
+    </nav>
+
+    <main class="content">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Une erreur inattendue est survenue.
+    <a href="." class="reload">Recharger</a>
+    <span class="dismiss">✕</span>
+</div>

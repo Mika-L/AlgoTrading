@@ -1,0 +1,23 @@
+<div class="tile">
+    <div class="tile-label">@Label</div>
+    <div class="tile-value @Tone">@Value</div>
+    @if (Note is not null)
+    {
+        <div class="tile-note">@Note</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Note { get; set; }
+
+    /// <summary>Classe de ton : <c>good</c>, <c>bad</c> ou rien.</summary>
+    [Parameter]
+    public string? Tone { get; set; }
+}

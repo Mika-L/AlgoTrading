@@ -1,4 +1,5 @@
 using AlgoTrading.Domain.Reporting;
+using AlgoTrading.Domain.Strategies;
 
 namespace AlgoTrading.Application.Ports;
 
@@ -15,7 +16,11 @@ public sealed record BacktestRunSummary(
     decimal MaxDrawdown,
     decimal Calmar,
     int TradeCount,
-    DateTimeOffset RanAt);
+    DateTimeOffset RanAt)
+{
+    /// <summary>Titres effectivement traités : c'est sur eux qu'un run se rejoue.</summary>
+    public IReadOnlyList<string> Universe { get; init; } = [];
+}
 
 /// <summary>
 /// Conserve les résultats de backtest. C'est ce qui fait que les résultats cessent de vivre
@@ -28,4 +33,7 @@ public interface IBacktestRunStore
     Task<IReadOnlyList<BacktestRunSummary>> ListAsync(int limit = 20, CancellationToken cancellationToken = default);
 
     Task<BacktestRunSummary?> GetAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>Recharge la stratégie d'un run : un résultat reste rejouable à l'identique.</summary>
+    Task<StrategyDefinition?> GetStrategyAsync(int id, CancellationToken cancellationToken = default);
 }

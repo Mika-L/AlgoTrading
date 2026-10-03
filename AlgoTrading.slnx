@@ -4,9 +4,11 @@
     <Project Path="src/AlgoTrading.Cli/AlgoTrading.Cli.csproj" />
     <Project Path="src/AlgoTrading.Domain/AlgoTrading.Domain.csproj" />
     <Project Path="src/AlgoTrading.Infrastructure/AlgoTrading.Infrastructure.csproj" />
+    <Project Path="src/AlgoTrading.Web/AlgoTrading.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AlgoTrading.Architecture.Tests/AlgoTrading.Architecture.Tests.csproj" />
     <Project Path="tests/AlgoTrading.Domain.Tests/AlgoTrading.Domain.Tests.csproj" />
+    <Project Path="tests/AlgoTrading.Web.Tests/AlgoTrading.Web.Tests.csproj" />
   </Folder>
 </Solution>

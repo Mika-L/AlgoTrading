@@ -3,7 +3,6 @@ using System.Globalization;
 using AlgoTrading.Application.Ports;
 using AlgoTrading.Application.UseCases;
 using AlgoTrading.Domain.Reporting;
-using AlgoTrading.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AlgoTrading.Cli.Commands;
@@ -114,30 +113,20 @@ public static class ReportCommands
         command.SetAction(async (parse, cancellationToken) =>
         {
             var output = services.GetRequiredService<IConsoleWriter>();
-            var store = services.GetRequiredService<SqliteBacktestRunStore>();
             var id = parse.GetValue(run);
 
-            var summary = await store.GetAsync(id, cancellationToken).ConfigureAwait(false);
-            var strategy = await store.GetStrategyAsync(id, cancellationToken).ConfigureAwait(false);
+            // Le run est rejoué depuis sa stratégie et son univers : c'est ce que garantit l'empreinte.
+            var replay = await services.GetRequiredService<ReplayBacktestRunHandler>().HandleAsync(id, cancellationToken).ConfigureAwait(false);
 
-            if (summary is null || strategy is null)
+            if (replay is null)
             {
                 output.WriteWarning($"Run {id} introuvable, ou stratégie non enregistrée.");
                 return 1;
             }
 
-            // Le run est rejoué depuis sa stratégie : c'est ce que garantit l'empreinte.
-            var response = await services.GetRequiredService<RunBacktestHandler>().HandleAsync(new RunBacktestRequest
-            {
-                Strategy = strategy,
-                From = summary.From,
-                To = summary.To,
-                InitialCash = summary.InitialCash,
-            }, cancellationToken).ConfigureAwait(false);
-
             var report = await services.GetRequiredService<GenerateReportHandler>().HandleAsync(new GenerateReportRequest
             {
-                Result = response.Result,
+                Result = replay.Replay.Result,
                 OutputDirectory = parse.GetValue(outputDirectory)!,
                 Formats = parse.GetValue(format) ?? [],
             }, cancellationToken).ConfigureAwait(false);
