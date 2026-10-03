@@ -1,0 +1,92 @@
+using AlgoTrading.Application.Ports;
+using AlgoTrading.Domain.Backtesting;
+using AlgoTrading.Domain.MarketData;
+using AlgoTrading.Domain.Strategies;
+
+namespace AlgoTrading.Application.UseCases;
+
+public sealed record RunWalkForwardRequest
+{
+    public required IReadOnlyList<RuleConfig> Catalog { get; init; }
+
+    public IReadOnlyList<Symbol> Universe { get; init; } = [];
+
+    public DateOnly? From { get; init; }
+
+    public DateOnly? To { get; init; }
+
+    public int TrainingMonths { get; init; } = 36;
+
+    public int TestMonths { get; init; } = 12;
+
+    public int MinimumRules { get; init; } = 2;
+
+    public int MaximumRules { get; init; } = 4;
+
+    public int MinimumTrades { get; init; }
+
+    public long? SampleSize { get; init; }
+
+    public ulong Seed { get; init; } = 1;
+
+    public bool OneVariantPerIndicator { get; init; } = true;
+
+    public decimal InitialCash { get; init; } = 100_000m;
+
+    public bool Parallel { get; init; } = true;
+}
+
+public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
+{
+    public async Task<WalkForwardReport> HandleAsync(
+        RunWalkForwardRequest request,
+        IProgress<WalkForwardProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var symbols = request.Universe;
+
+        if (symbols.Count == 0)
+        {
+            var known = await repository.ListInstrumentsAsync(cancellationToken).ConfigureAwait(false);
+            symbols = [.. known.Select(static i => i.Symbol)];
+        }
+
+        var universe = await repository.LoadUniverseAsync(symbols, request.From, request.To, cancellationToken).ConfigureAwait(false);
+        var tradable = universe.Where(static s => !s.IsEmpty).ToArray();
+
+        if (tradable.Length == 0)
+        {
+            throw new InvalidOperationException("Aucune cotation dans la plage demandée.");
+        }
+
+        // L'exploration est synchrone et longue : elle ne doit pas occuper le fil de l'appelant.
+        return await Task.Run(
+            () => new WalkForward().Run(
+                new WalkForwardRequest
+                {
+                    Optimization = new OptimizationRequest
+                    {
+                        Catalog = request.Catalog,
+                        Universe = tradable,
+                        MinimumRules = request.MinimumRules,
+                        MaximumRules = request.MaximumRules,
+                        MinimumTrades = request.MinimumTrades,
+                        SampleSize = request.SampleSize,
+                        Seed = request.Seed,
+                        OneVariantPerIndicator = request.OneVariantPerIndicator,
+                        InitialCash = request.InitialCash,
+                        Parallel = request.Parallel,
+                        Top = 1,
+                    },
+                    From = request.From,
+                    To = request.To,
+                    TrainingMonths = request.TrainingMonths,
+                    TestMonths = request.TestMonths,
+                },
+                progress,
+                cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+}

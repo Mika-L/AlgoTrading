@@ -42,6 +42,7 @@ fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n
 | `algo data gaps` | Séances manquantes et **ruptures de cours**. |
 | `algo backtest run --strategy <fichier>` | Exécute une stratégie (`--save`, `--from`, `--to`, `--cash`). |
 | `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`, `--min-trades`, `--sample`, `--seed`). |
+| `algo backtest walk-forward --rules <fichier>` | Optimise sur une fenêtre, juge le gagnant sur la suivante (`--train-months`, `--test-months`, `--to`). |
 | `algo backtest compare --runs 12,17` | Compare des résultats enregistrés. |
 | `algo report show --run <n>` | Affiche un résultat. |
 | `algo report chart --run <n>` | Rejoue un run et exporte CSV et graphique. |
@@ -85,6 +86,21 @@ algo backtest optimize --rules rules/screening.json --sample 20000
 
 Le rapport donne le nombre de combinaisons réellement essayées. Il faudra en tenir compte pour
 corriger le meilleur score de la chance accumulée au fil des essais.
+
+Le classement d'une exploration ne vaut que sur la période explorée. `walk-forward` optimise
+sur une fenêtre (36 mois par défaut), joue le gagnant sur les 12 mois suivants, décale d'un an
+et recommence. Les fenêtres de test, mises bout à bout, donnent la seule performance qui
+compte : celle de stratégies jugées sur des séances qu'elles n'ont jamais vues. L'efficacité
+rapporte le rendement annualisé en test à celui de l'apprentissage. Une période réservée au
+verdict final se protège avec `--to` :
+
+```bash
+algo backtest walk-forward --rules rules/screening.json --sample 3000 --to 2023-12-31
+```
+
+Premier passage sur le CAC 40 (2017-2023, quatre fenêtres de test) : des Calmar
+d'apprentissage entre 1,1 et 1,7 tombent à un rendement cumulé de −0,55 % hors échantillon,
+pour une pire baisse de 36 %. C'est le surapprentissage que cette validation sert à révéler.
 
 ## Architecture
 
@@ -208,8 +224,10 @@ Chaque résultat porte ses réserves, affichées avec les chiffres :
   la performance. C'est le principal défaut méthodologique restant ; le corriger demande un
   univers daté.
 - **Fenêtre unique.** Le classement de l'optimiseur se fait par Calmar et non par performance
-  brute, mais optimiser sur une seule période reste du surapprentissage. `OptimizationRequest`
-  porte déjà `From` et `To` pour qu'un walk-forward soit une boucle, pas une refonte.
+  brute, mais optimiser sur une seule période reste du surapprentissage : seul `walk-forward`
+  juge une stratégie hors échantillon.
+- **Fin de fenêtre de test.** Les positions encore ouvertes à la fin d'une fenêtre de test sont
+  comptées à leur valeur de clôture, sans frais de sortie.
 
 ## Vérification
 

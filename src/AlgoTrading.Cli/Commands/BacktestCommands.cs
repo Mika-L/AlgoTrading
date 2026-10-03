@@ -17,6 +17,7 @@ public static class BacktestCommands
 
         backtest.Add(Run(services));
         backtest.Add(Optimize(services));
+        backtest.Add(WalkForward(services));
         backtest.Add(Compare(services));
 
         return backtest;
@@ -100,22 +101,11 @@ public static class BacktestCommands
         {
             var output = services.GetRequiredService<IConsoleWriter>();
 
-            IReadOnlyList<RuleConfig> catalog = RuleRegistry.DefaultCatalog();
+            var catalog = await ReadCatalogAsync(parse.GetValue(rules), output, cancellationToken).ConfigureAwait(false);
 
-            if (parse.GetValue(rules) is { } file)
+            if (catalog is null)
             {
-                if (!file.Exists)
-                {
-                    output.WriteWarning($"Catalogue introuvable : {file.FullName}");
-                    return 1;
-                }
-
-                var expanded = RuleCatalog.Parse(await File.ReadAllTextAsync(file.FullName, cancellationToken).ConfigureAwait(false));
-                catalog = expanded.Rules;
-
-                output.WriteLine(expanded.Discarded == 0
-                    ? $"Catalogue : {expanded.Rules.Count} règles."
-                    : $"Catalogue : {expanded.Rules.Count} règles, {expanded.Discarded} variantes invalides écartées.");
+                return 1;
             }
 
             var response = await services.GetRequiredService<OptimizeStrategyHandler>().HandleAsync(
@@ -185,6 +175,147 @@ public static class BacktestCommands
         });
 
         return command;
+    }
+
+    private static Command WalkForward(IServiceProvider services)
+    {
+        var rules = new Option<FileInfo?>("--rules") { Description = "Catalogue de règles, plages comprises ; par défaut, les douze indicateurs directionnels." };
+        var training = new Option<int>("--train-months") { Description = "Durée de chaque fenêtre d'apprentissage, en mois.", DefaultValueFactory = _ => 36 };
+        var test = new Option<int>("--test-months") { Description = "Durée de chaque fenêtre de test, et décalage entre deux fenêtres.", DefaultValueFactory = _ => 12 };
+        var minK = new Option<int>("--min-k") { Description = "Nombre minimal de règles par combinaison.", DefaultValueFactory = _ => 2 };
+        var maxK = new Option<int>("--max-k") { Description = "Nombre maximal de règles par combinaison.", DefaultValueFactory = _ => 4 };
+        var minTrades = new Option<int>("--min-trades") { Description = "Nombre minimal de trades en apprentissage pour être retenue.", DefaultValueFactory = _ => 20 };
+        var sample = new Option<long?>("--sample") { Description = "Tire au hasard ce nombre de combinaisons par fenêtre au lieu de toutes les essayer." };
+        var seed = new Option<ulong>("--seed") { Description = "Graine du tirage aléatoire.", DefaultValueFactory = _ => 1UL };
+        var allowVariants = new Option<bool>("--allow-same-indicator") { Description = "Autorise deux variantes d'un même indicateur dans une combinaison." };
+        var parallel = new Option<bool>("--parallel") { Description = "Répartit l'exploration sur tous les cœurs.", DefaultValueFactory = _ => true };
+        var from = new Option<DateOnly?>("--from") { Description = "Début de la première fenêtre." };
+        var to = new Option<DateOnly?>("--to") { Description = "Fin de la dernière fenêtre — s'arrêter avant la période réservée au verdict final." };
+        var cash = new Option<decimal>("--cash") { Description = "Capital de départ.", DefaultValueFactory = _ => 100_000m };
+
+        var command = new Command("walk-forward", "Optimise sur une fenêtre, joue le gagnant sur la suivante, et recommence.");
+        foreach (var option in new Option[] { rules, training, test, minK, maxK, minTrades, sample, seed, allowVariants, parallel, from, to, cash })
+        {
+            command.Add(option);
+        }
+
+        command.SetAction(async (parse, cancellationToken) =>
+        {
+            var output = services.GetRequiredService<IConsoleWriter>();
+            var catalog = await ReadCatalogAsync(parse.GetValue(rules), output, cancellationToken).ConfigureAwait(false);
+
+            if (catalog is null)
+            {
+                return 1;
+            }
+
+            var report = await services.GetRequiredService<RunWalkForwardHandler>().HandleAsync(
+                new RunWalkForwardRequest
+                {
+                    Catalog = catalog,
+                    TrainingMonths = parse.GetValue(training),
+                    TestMonths = parse.GetValue(test),
+                    MinimumRules = parse.GetValue(minK),
+                    MaximumRules = parse.GetValue(maxK),
+                    MinimumTrades = parse.GetValue(minTrades),
+                    SampleSize = parse.GetValue(sample),
+                    Seed = parse.GetValue(seed),
+                    OneVariantPerIndicator = !parse.GetValue(allowVariants),
+                    From = parse.GetValue(from),
+                    To = parse.GetValue(to),
+                    InitialCash = parse.GetValue(cash),
+                    Parallel = parse.GetValue(parallel),
+                },
+                new ConsoleWalkForwardProgress(output),
+                cancellationToken).ConfigureAwait(false);
+
+            output.WriteLine();
+            output.WriteLine("Chaque gagnant d'apprentissage n'est jugé que sur la fenêtre de test qui suit.");
+            output.WriteLine();
+
+            output.WriteTable(
+                ["Apprentissage", "Test", "Retenue", "Calmar appr.", "Rendement test", "Calmar test", "Trades test"],
+                [
+                    .. report.Windows.Select(w => new[]
+                    {
+                        $"{w.TrainFrom:yyyy-MM-dd} → {w.TrainTo:yyyy-MM-dd}",
+                        $"{w.TestFrom:yyyy-MM-dd} → {w.TestTo:yyyy-MM-dd}",
+                        w.Selected?.Strategy.Name ?? "aucune — en liquidités",
+                        w.Selected?.Score.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                        w.Test is null ? "—" : ConsoleWriter.Percent(w.Test.Metrics.TotalReturn),
+                        w.Test?.Metrics.Calmar.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                        w.Test?.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture) ?? "—",
+                    }),
+                ]);
+
+            var oos = report.OutOfSample;
+            output.WriteLine();
+            output.WriteLine("Hors échantillon, fenêtres de test mises bout à bout :");
+            output.WriteTable(
+                ["Rendement", "Annualisé", "Pire baisse", "Calmar", "Sharpe", "Trades", "Fenêtres gagnantes", "Efficacité"],
+                [[
+                    ConsoleWriter.Percent(oos.TotalReturn),
+                    ConsoleWriter.Percent(oos.AnnualisedReturn),
+                    ConsoleWriter.Percent(oos.MaxDrawdown),
+                    oos.Calmar.ToString("0.00", CultureInfo.CurrentCulture),
+                    oos.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+                    oos.TradeCount.ToString(CultureInfo.CurrentCulture),
+                    ConsoleWriter.Percent(report.ProfitableWindowShare),
+                    report.Efficiency?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                ]]);
+
+            output.WriteLine();
+            output.WriteLine($"{report.Evaluated:N0} combinaisons essayées au total. Efficacité : rendement annualisé en test rapporté à celui de l'apprentissage.");
+
+            return 0;
+        });
+
+        return command;
+    }
+
+    /// <summary>Le catalogue d'un fichier, plages développées, ou le catalogue par défaut ; rien si le fichier manque.</summary>
+    private static async Task<IReadOnlyList<RuleConfig>?> ReadCatalogAsync(FileInfo? file, IConsoleWriter output, CancellationToken cancellationToken)
+    {
+        if (file is null)
+        {
+            return RuleRegistry.DefaultCatalog();
+        }
+
+        if (!file.Exists)
+        {
+            output.WriteWarning($"Catalogue introuvable : {file.FullName}");
+            return null;
+        }
+
+        var expanded = RuleCatalog.Parse(await File.ReadAllTextAsync(file.FullName, cancellationToken).ConfigureAwait(false));
+
+        output.WriteLine(expanded.Discarded == 0
+            ? $"Catalogue : {expanded.Rules.Count} règles."
+            : $"Catalogue : {expanded.Rules.Count} règles, {expanded.Discarded} variantes invalides écartées.");
+
+        return expanded.Rules;
+    }
+
+    private sealed class ConsoleWalkForwardProgress(IConsoleWriter output) : IProgress<WalkForwardProgress>
+    {
+        private readonly Lock _gate = new();
+        private (int Window, long Evaluated) _shown;
+
+        public void Report(WalkForwardProgress value)
+        {
+            lock (_gate)
+            {
+                var current = (value.Window, value.Optimization.Evaluated);
+                if (current.CompareTo(_shown) <= 0)
+                {
+                    return;
+                }
+
+                _shown = current;
+                var optimization = value.Optimization;
+                output.Write($"\rFenêtre {value.Window}/{value.WindowCount} — {optimization.Evaluated:N0} / {optimization.Planned:N0} ({(double)optimization.Evaluated / optimization.Planned:P0})   ");
+            }
+        }
     }
 
     /// <summary>

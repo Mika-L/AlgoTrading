@@ -62,6 +62,12 @@ public sealed record OptimizationRequest
     /// par indicateur.
     /// </summary>
     public bool OneVariantPerIndicator { get; init; } = true;
+
+    /// <summary>
+    /// Cache d'indicateurs à réutiliser d'une exploration à l'autre sur le même univers — d'une
+    /// fenêtre de walk-forward à la suivante, par exemple. Absent, chaque exploration a le sien.
+    /// </summary>
+    public IndicatorCache? Cache { get; init; }
 }
 
 /// <summary>
@@ -149,7 +155,7 @@ public sealed class StrategyOptimizer
 
         // Un seul cache pour toutes les combinaisons : sans état après remplissage, il se lit
         // en parallèle sans verrou.
-        var cache = new IndicatorCache(request.Universe);
+        var cache = request.Cache ?? new IndicatorCache(request.Universe);
         var ranking = new BoundedRanking(request.Top);
         var reportEvery = Math.Max(1, planned / 200);
         long evaluated = 0;
