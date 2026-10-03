@@ -66,8 +66,16 @@ public sealed class BacktestEngine
         var equityCurve = new List<EquityPoint>(calendar.Count);
         var rejected = new List<RejectedOrder>();
 
-        // Un curseur par titre, qui n'avance jamais que d'une barre par séance.
+        // Un curseur par titre, qui n'avance jamais que d'une barre par séance. Il part de la
+        // première barre de la plage : une série commencée avant elle bloquerait sinon son
+        // curseur sur une date que le calendrier ne visitera jamais, et le titre ne coterait plus.
         var cursors = new int[universe.Length];
+        for (var i = 0; i < universe.Length; i++)
+        {
+            var start = universe[i].IndexAtOrAfter(calendar.First);
+            cursors[i] = start < 0 ? universe[i].Count : start;
+        }
+
         var marks = new Dictionary<Symbol, decimal>(universe.Length);
         var pending = new List<PendingOrder>();
 
