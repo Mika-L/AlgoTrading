@@ -104,6 +104,20 @@ public sealed record OptimizationReport(IReadOnlyList<OptimizationCandidate> Top
 /// </summary>
 public sealed class StrategyOptimizer
 {
+    /// <summary>
+    /// Nombre de combinaisons qu'explorerait une optimisation exhaustive sur ce catalogue, sans
+    /// en jouer aucune : de quoi décider d'un échantillon avant de lancer.
+    /// </summary>
+    public static BigInteger CountCombinations(IReadOnlyList<RuleConfig> catalog, int minimumRules, int maximumRules, bool oneVariantPerIndicator = true)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentOutOfRangeException.ThrowIfLessThan(minimumRules, 1);
+
+        return maximumRules < minimumRules
+            ? BigInteger.Zero
+            : CombinationSpace.Of(catalog, minimumRules, maximumRules, oneVariantPerIndicator).Total;
+    }
+
     public OptimizationReport Run(
         OptimizationRequest request,
         IProgress<OptimizationProgress>? progress = null,
@@ -135,7 +149,7 @@ public sealed class StrategyOptimizer
             throw new ArgumentException($"La taille maximale ({request.MaximumRules}) ne peut pas être inférieure à la minimale ({request.MinimumRules}).", nameof(request));
         }
 
-        var space = CombinationSpace.Of(request);
+        var space = CombinationSpace.Of(request.Catalog, request.MinimumRules, request.MaximumRules, request.OneVariantPerIndicator);
 
         if (space.Total.IsZero)
         {
@@ -344,17 +358,17 @@ public sealed class StrategyOptimizer
 
         public BigInteger Total { get; }
 
-        public static CombinationSpace Of(OptimizationRequest request)
+        public static CombinationSpace Of(IReadOnlyList<RuleConfig> catalog, int minimumRules, int maximumRules, bool oneVariantPerIndicator)
         {
-            var groups = request.OneVariantPerIndicator
-                ? request.Catalog
+            var groups = oneVariantPerIndicator
+                ? catalog
                     .Select(static (rule, index) => (rule.Indicator, index))
                     .GroupBy(static entry => entry.Indicator, StringComparer.Ordinal)
                     .Select(static group => group.Select(static entry => entry.index).ToArray())
                     .ToArray()
-                : [.. Enumerable.Range(0, request.Catalog.Count).Select(static index => new[] { index })];
+                : [.. Enumerable.Range(0, catalog.Count).Select(static index => new[] { index })];
 
-            return new CombinationSpace(groups, request.MinimumRules, Math.Min(request.MaximumRules, groups.Length));
+            return new CombinationSpace(groups, minimumRules, Math.Min(maximumRules, groups.Length));
         }
 
         /// <summary>Chaque combinaison une fois : pour chaque choix de groupes, le produit de leurs variantes.</summary>

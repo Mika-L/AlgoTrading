@@ -1,0 +1,96 @@
+<div class="notice">
+    @Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture) variantes jouées seules. Le <strong>voisinage</strong> est le Calmar moyen
+    de la variante et de ses voisines de grille (un réglage décalé d'un cran) : un plateau le garde proche du Calmar, un pic isolé l'en éloigne.
+    Les indicateurs sont classés sur leur meilleur voisinage.
+</div>
+
+@foreach (var group in Report.Groups)
+{
+    var expanded = _expanded.Contains(group.Indicator);
+    var axes = ScreeningHeatmap.VaryingAxes(group.Variants);
+    var choice = _axes.GetValueOrDefault(group.Indicator);
+    var map = ScreeningHeatmap.For(group.Variants, choice.X, choice.Y);
+
+    <div class="card">
+        <div class="card-header">
+            <h2>@group.Indicator</h2>
+            <span class="muted">@group.Variants.Count variante@(group.Variants.Count > 1 ? "s" : null) · meilleur voisinage @Labels.Number(group.Variants[0].NeighbourhoodScore)</span>
+        </div>
+
+        @if (map is not null)
+        {
+            <Heatmap Map="map" Axes="axes" OnAxesChanged="selected => _axes[group.Indicator] = selected" />
+        }
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Variante</th>
+                        <th class="num">Voisinage</th>
+                        <th class="num">Calmar</th>
+                        <th class="num">Pire voisine</th>
+                        <th class="num">Voisines</th>
+                        <th class="num">Sharpe</th>
+                        <th class="num">Rendement</th>
+                        <th class="num">Trades</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var variant in expanded ? group.Variants : group.Variants.Take(Shown))
+                    {
+                        <tr>
+                            <td class="mono">@variant.Label</td>
+                            <td class="num"><strong>@Labels.Number(variant.NeighbourhoodScore)</strong></td>
+                            <td class="num">
+                                @Labels.Number(variant.Score)
+                                @if (!variant.Eligible)
+                                {
+                                    <span class="badge" title="Moins de trades que le minimum : compte pour zéro">peu de trades</span>
+                                }
+                            </td>
+                            <td class="num">@(variant.WorstNeighbour is { } worst ? Labels.Number(worst) : "—")</td>
+                            <td class="num">@variant.Neighbours</td>
+                            <td class="num">@Labels.Number(variant.Metrics.Sharpe)</td>
+                            <td class="num @Tone(variant.Metrics.TotalReturn)">@Labels.SignedPercent(variant.Metrics.TotalReturn)</td>
+                            <td class="num">@variant.Metrics.TradeCount.ToString("N0", CultureInfo.CurrentCulture)</td>
+                            <td><button class="btn small ghost" @onclick="() => OnRetain.InvokeAsync(variant.Strategy)">Retenir</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (group.Variants.Count > Shown)
+        {
+            <button class="btn small ghost" style="margin-top:8px" @onclick="() => Toggle(group.Indicator)">
+                @(expanded ? "Réduire" : $"Afficher les {group.Variants.Count} variantes")
+            </button>
+        }
+    </div>
+}
+
+@code {
+    private const int Shown = 5;
+
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (string? X, string? Y)> _axes = new(StringComparer.Ordinal);
+
+    [Parameter, EditorRequired]
+    public ScreeningReport Report { get; set; } = default!;
+
+    /// <summary>Enregistre la stratégie à une règle d'une variante, telle qu'elle a été jouée.</summary>
+    [Parameter]
+    public EventCallback<StrategyDefinition> OnRetain { get; set; }
+
+    private void Toggle(string indicator)
+    {
+        if (!_expanded.Remove(indicator))
+        {
+            _expanded.Add(indicator);
+        }
+    }
+
+    private static string? Tone(decimal value) => value > 0m ? "good" : value < 0m ? "bad" : null;
+}

@@ -31,6 +31,13 @@ stratégie, la période, le capital et les titres enregistrés, et signale tout 
 résultat d'origine. Dans l'éditeur, les taux se saisissent en pour cent et redeviennent des
 fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n'a pas modifiée.
 
+La page Exploration reprend `screen` et `walk-forward` sur les catalogues de `rules/`. Le
+criblage s'y lit indicateur par indicateur, avec une carte de chaleur sur deux réglages au
+choix où les plateaux se repèrent d'un coup d'œil. Le walk-forward y trace la courbe hors
+échantillon face à l'achat-conservation. « Retenir » enregistre une variante ou une
+combinaison comme stratégie et l'ouvre dans l'éditeur. Le calcul tourne tant que l'onglet
+reste ouvert : rien n'est persisté, et quitter la page l'interrompt.
+
 ## Commandes
 
 | Commande | Rôle |
@@ -135,7 +142,7 @@ src/
 tests/
   AlgoTrading.Domain.Tests/       indicateurs, règles, moteur, mesures
   AlgoTrading.Architecture.Tests/ frontières entre modules
-  AlgoTrading.Web.Tests/          formulaire de stratégie, bibliothèque de fichiers
+  AlgoTrading.Web.Tests/          formulaire de stratégie, bibliothèques de fichiers, carte de chaleur
 ```
 
 Dépendances : `Domain` ← `Application` ← `Infrastructure` ← `Cli` et `Web`. Le câblage commun aux

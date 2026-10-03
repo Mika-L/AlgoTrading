@@ -1,0 +1,91 @@
+@* Carte d'une grille de variantes : un plateau s'y lit comme une zone uniforme, un pic comme une case isolée. *@
+
+<div class="heatmap">
+    <div class="row heatmap-axes">
+        <label class="field">
+            <span>Abscisse</span>
+            <select value="@Map.XAxis" @onchange="e => OnAxesChanged.InvokeAsync((e.Value?.ToString(), Map.YAxis))">
+                @foreach (var axis in Axes)
+                {
+                    <option value="@axis">@ScreeningHeatmap.AxisLabel(axis)</option>
+                }
+            </select>
+        </label>
+        @if (Axes.Count > 1)
+        {
+            <label class="field">
+                <span>Ordonnée</span>
+                <select value="@Map.YAxis" @onchange="e => OnAxesChanged.InvokeAsync((Map.XAxis, e.Value?.ToString()))">
+                    @foreach (var axis in Axes.Where(a => a != Map.XAxis))
+                    {
+                        <option value="@axis">@ScreeningHeatmap.AxisLabel(axis)</option>
+                    }
+                </select>
+            </label>
+        }
+        <span class="muted heatmap-note">Meilleur Calmar parmi les autres réglages · moins de trades que le minimum = 0 · cadre : variante en tête</span>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th class="muted">@(Map.YAxis is { } y ? $"{ScreeningHeatmap.AxisLabel(y)} \\ {ScreeningHeatmap.AxisLabel(Map.XAxis)}" : ScreeningHeatmap.AxisLabel(Map.XAxis))</th>
+                    @foreach (var column in Map.Columns)
+                    {
+                        <th class="num">@Setting(column)</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @for (var row = 0; row < Map.Rows.Count; row++)
+                {
+                    var r = row;
+                    <tr>
+                        <th class="num">@(Map.Rows[r] is { } value ? Setting(value) : "Calmar")</th>
+                        @for (var column = 0; column < Map.Columns.Count; column++)
+                        {
+                            var c = column;
+                            var cell = Map.Cells[r, c];
+                            <td class="num cell @(Map.IsLeader(r, c) ? "leader" : null)" style="@Shade(cell)">
+                                @(cell is { } v ? Labels.Number(v) : "—")
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private decimal _scale;
+
+    [Parameter, EditorRequired]
+    public ScreeningHeatmap Map { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<string> Axes { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<(string? X, string? Y)> OnAxesChanged { get; set; }
+
+    protected override void OnParametersSet() => _scale = Map.Scale();
+
+    /// <summary>Vert pour un Calmar positif, rouge pour un négatif, d'autant plus franc qu'il s'éloigne de zéro.</summary>
+    private string? Shade(decimal? cell)
+    {
+        if (cell is not { } value || _scale == 0m || value == 0m)
+        {
+            return null;
+        }
+
+        var strength = (int)Math.Round(12 + (60 * Math.Abs(value) / _scale));
+        var color = value > 0m ? "var(--good)" : "var(--bad)";
+
+        return $"background: color-mix(in srgb, {color} {strength}%, transparent)";
+    }
+
+    /// <summary>Valeur d'un réglage telle qu'on l'écrit : 1,5 et non 1,50, 20 et non 20,00.</summary>
+    private static string Setting(decimal value) => value.ToString("0.####", CultureInfo.CurrentCulture);
+}

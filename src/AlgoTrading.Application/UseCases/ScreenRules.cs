@@ -33,18 +33,21 @@ public sealed class ScreenRulesHandler(IMarketDataRepository repository)
 
         var tradable = await repository.LoadTradableAsync(request.Universe, request.From, request.To, cancellationToken).ConfigureAwait(false);
 
-        return new RuleScreening().Run(
-            new OptimizationRequest
-            {
-                Catalog = request.Catalog,
-                Universe = tradable,
-                From = request.From,
-                To = request.To,
-                MinimumTrades = request.MinimumTrades,
-                InitialCash = request.InitialCash,
-                Parallel = request.Parallel,
-            },
-            progress,
-            cancellationToken);
+        // L'exploration est synchrone et longue : elle ne doit pas occuper le fil de l'appelant.
+        return await Task.Run(
+            () => new RuleScreening().Run(
+                new OptimizationRequest
+                {
+                    Catalog = request.Catalog,
+                    Universe = tradable,
+                    From = request.From,
+                    To = request.To,
+                    MinimumTrades = request.MinimumTrades,
+                    InitialCash = request.InitialCash,
+                    Parallel = request.Parallel,
+                },
+                progress,
+                cancellationToken),
+            cancellationToken).ConfigureAwait(false);
     }
 }

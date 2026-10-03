@@ -4,6 +4,12 @@ using AlgoTrading.Domain.Strategies;
 namespace AlgoTrading.Domain.Backtesting;
 
 /// <summary>Une variante jouée seule, et ce qu'en disent ses voisines.</summary>
+/// <param name="Strategy">La stratégie à une règle telle qu'elle a été jouée : la retenir, c'est
+/// enregistrer exactement ce qui a été mesuré.</param>
+/// <param name="Family">Tout ce qui, dans la règle, n'est pas un réglage numérique. Deux variantes
+/// de familles différentes ne se comparent pas sur une même grille.</param>
+/// <param name="Axes">Les réglages numériques — paramètres d'indicateur préfixés par
+/// <c>parameters.</c>, seuils, pivot, poids.</param>
 /// <param name="Eligible">A atteint le nombre minimal de trades.</param>
 /// <param name="Neighbours">Variantes voisines : même règle, un seul réglage décalé d'un cran
 /// dans la grille.</param>
@@ -11,7 +17,9 @@ namespace AlgoTrading.Domain.Backtesting;
 /// non éligible comptant pour zéro. Un plateau le garde haut, un pic isolé le fait chuter.</param>
 /// <param name="WorstNeighbour">Le plus faible Calmar du voisinage, compté de même.</param>
 public sealed record ScreenedVariant(
-    RuleConfig Rule,
+    StrategyDefinition Strategy,
+    string Family,
+    IReadOnlyDictionary<string, decimal> Axes,
     string Label,
     PerformanceMetrics Metrics,
     bool Eligible,
@@ -19,7 +27,12 @@ public sealed record ScreenedVariant(
     decimal NeighbourhoodScore,
     decimal? WorstNeighbour)
 {
+    public RuleConfig Rule => Strategy.Entry.Rules[0];
+
     public decimal Score => Metrics.Calmar;
+
+    /// <summary>Ce que la variante prouve : son Calmar si elle a assez tradé, rien sinon.</summary>
+    public decimal Evidence => Eligible ? Score : 0m;
 }
 
 /// <summary>Les variantes d'un indicateur, de la plus robuste à la moins robuste.</summary>
@@ -58,14 +71,14 @@ public sealed class RuleScreening
             cancellationToken);
 
         // Les règles des stratégies composées sont celles du catalogue, à l'identique.
-        var metrics = new Dictionary<RuleConfig, PerformanceMetrics>(ReferenceEqualityComparer.Instance);
+        var played = new Dictionary<RuleConfig, OptimizationCandidate>(ReferenceEqualityComparer.Instance);
         foreach (var candidate in report.Top)
         {
-            metrics[candidate.Strategy.Entry.Rules[0]] = candidate.Metrics;
+            played[candidate.Strategy.Entry.Rules[0]] = candidate;
         }
 
         var points = request.Catalog
-            .Select(rule => new Point(rule, metrics[rule], metrics[rule].TradeCount >= request.MinimumTrades))
+            .Select(rule => new Point(played[rule], played[rule].Metrics.TradeCount >= request.MinimumTrades))
             .ToArray();
 
         var screened = points
@@ -120,7 +133,9 @@ public sealed class RuleScreening
             }
 
             yield return new ScreenedVariant(
-                family[i].Rule,
+                family[i].Candidate.Strategy,
+                family[i].Family,
+                family[i].Axes,
                 StrategyOptimizer.Label(family[i].Rule),
                 family[i].Metrics,
                 family[i].Eligible,
@@ -130,11 +145,13 @@ public sealed class RuleScreening
         }
     }
 
-    private sealed class Point(RuleConfig rule, PerformanceMetrics metrics, bool eligible)
+    private sealed class Point(OptimizationCandidate candidate, bool eligible)
     {
-        public RuleConfig Rule { get; } = rule;
+        public OptimizationCandidate Candidate { get; } = candidate;
 
-        public PerformanceMetrics Metrics { get; } = metrics;
+        public RuleConfig Rule => Candidate.Strategy.Entry.Rules[0];
+
+        public PerformanceMetrics Metrics => Candidate.Metrics;
 
         public bool Eligible { get; } = eligible;
 
@@ -142,13 +159,15 @@ public sealed class RuleScreening
         public decimal Evidence => Eligible ? Metrics.Calmar : 0m;
 
         /// <summary>Les réglages numériques, seuls susceptibles de former une grille.</summary>
-        public SortedDictionary<string, decimal> Axes { get; } = AxesOf(rule);
+        public SortedDictionary<string, decimal> Axes { get; } = AxesOf(candidate.Strategy.Entry.Rules[0]);
 
         /// <summary>
         /// Tout ce qui n'est pas un axe numérique : deux variantes de familles différentes ne
         /// sont jamais voisines, quelle que soit la proximité de leurs nombres.
         /// </summary>
-        public string Family { get; } = string.Join(
+        public string Family { get; } = FamilyOf(candidate.Strategy.Entry.Rules[0]);
+
+        private static string FamilyOf(RuleConfig rule) => string.Join(
             '|',
             rule.Type,
             rule.Indicator,

@@ -173,7 +173,7 @@ input, select, textarea {
 
 input[type=checkbox] { width: auto; accent-color: var(--accent); }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
-input:disabled { color: var(--text-muted); background: var(--surface-2); }
+input:disabled, select:disabled { color: var(--text-muted); background: var(--surface-2); }
 
 .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 
@@ -325,3 +325,22 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-weight: 
 }
 
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 12px; top: 8px; }
+
+/* Exploration */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 14px; font: inherit; color: var(--text-secondary); cursor: pointer; margin-bottom: -1px; }
+.tab:hover:not(:disabled) { color: var(--text-primary); }
+.tab.active { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:disabled { cursor: default; opacity: .6; }
+.explore-fields { margin-bottom: 8px; }
+.explore-fields .row input { width: 64px; }
+.progress { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; margin-top: 14px; }
+.progress > div { height: 100%; background: var(--accent); transition: width .25s ease; }
+.heatmap { margin-bottom: 14px; }
+.heatmap-axes { align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px; }
+.heatmap-axes .field { width: 150px; }
+.heatmap-note { font-size: 12px; }
+.heatmap table { width: auto; }
+.heatmap th, .heatmap td.cell { min-width: 64px; }
+.heatmap td.cell { font-variant-numeric: tabular-nums; }
+.heatmap td.leader { outline: 2px solid var(--text-primary); outline-offset: -2px; font-weight: 650; }

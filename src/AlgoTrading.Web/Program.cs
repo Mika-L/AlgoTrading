@@ -35,6 +35,7 @@ builder.Services.AddAlgoTrading(builder.Configuration, database);
 builder.Services.PostConfigure<StrategyStoreOptions>(o => o.Directory = FromCli(o.Directory));
 builder.Services.PostConfigure<CsvProviderOptions>(o => o.Directory = FromCli(o.Directory));
 builder.Services.AddSingleton(IndicatorLineCatalog.Discover());
+builder.Services.AddSingleton(new RuleCatalogLibrary(FromCli("rules")));
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 

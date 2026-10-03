@@ -48,6 +48,14 @@ public class StrategyOptimizerTests
     }
 
     [Fact]
+    public void should_count_the_search_space_without_playing_it()
+    {
+        StrategyOptimizer.CountCombinations(Catalog, 2, 3).ShouldBe(34);
+        StrategyOptimizer.CountCombinations(Catalog, 2, 3, oneVariantPerIndicator: false).ShouldBe(56);
+        StrategyOptimizer.CountCombinations(Catalog, 3, 2).ShouldBe(0);
+    }
+
+    [Fact]
     public void should_combine_variants_of_the_same_indicator_when_allowed()
     {
         var report = Run(Request() with { OneVariantPerIndicator = false });
