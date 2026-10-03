@@ -90,6 +90,22 @@ public class WalkForwardTests
     }
 
     [Fact]
+    public void should_measure_buy_and_hold_on_the_same_test_windows()
+    {
+        var report = Run(Request());
+
+        foreach (var window in report.Windows)
+        {
+            var expected = BuyAndHold.Curve([Bars], window.TestFrom, window.TestTo, 100_000m);
+            window.BenchmarkReturn.ShouldBe((expected[^1].Equity / 100_000m) - 1m);
+        }
+
+        var compounded = report.Windows.Aggregate(1m, static (growth, w) => growth * (1m + w.BenchmarkReturn));
+        report.BenchmarkCurve.Select(static p => p.Date).ShouldBe(report.OutOfSampleCurve.Select(static p => p.Date));
+        report.BenchmarkCurve[^1].Equity.ShouldBe(100_000m * compounded, 0.01m);
+    }
+
+    [Fact]
     public void should_stay_in_cash_through_a_test_window_without_an_eligible_combination()
     {
         var request = Request();

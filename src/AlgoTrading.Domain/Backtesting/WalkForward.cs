@@ -30,6 +30,8 @@ public sealed record WalkForwardRequest
 /// <param name="Selected">La meilleure combinaison de l'apprentissage, ou rien si aucune n'a
 /// atteint le nombre minimal de trades — la fenêtre de test se passe alors en liquidités.</param>
 /// <param name="Test">La combinaison retenue jouée sur la fenêtre de test, qu'elle n'a jamais vue.</param>
+/// <param name="Benchmark">L'univers acheté à parts égales et conservé sur la même fenêtre de test.</param>
+/// <param name="BenchmarkReturn">Rendement de cette référence sur la fenêtre, depuis le capital initial.</param>
 public sealed record WalkForwardWindow(
     DateOnly TrainFrom,
     DateOnly TrainTo,
@@ -37,18 +39,28 @@ public sealed record WalkForwardWindow(
     DateOnly TestTo,
     OptimizationReport Training,
     OptimizationCandidate? Selected,
-    BacktestResult? Test);
+    BacktestResult? Test,
+    IReadOnlyList<EquityPoint> Benchmark,
+    decimal BenchmarkReturn);
 
 public sealed record WalkForwardProgress(int Window, int WindowCount, OptimizationProgress Optimization);
 
 /// <param name="OutOfSampleCurve">Les fenêtres de test mises bout à bout, chacune repartant de
 /// l'actif où la précédente s'est arrêtée.</param>
 /// <param name="OutOfSample">Mesures de cette courbe : la seule performance qui compte.</param>
+/// <param name="BenchmarkCurve">L'achat-conservation de l'univers, chaîné sur les mêmes fenêtres
+/// de test : ce que la stratégie doit battre pour justifier son existence.</param>
 public sealed record WalkForwardReport(
     IReadOnlyList<WalkForwardWindow> Windows,
     IReadOnlyList<EquityPoint> OutOfSampleCurve,
-    PerformanceMetrics OutOfSample)
+    PerformanceMetrics OutOfSample,
+    IReadOnlyList<EquityPoint> BenchmarkCurve,
+    PerformanceMetrics Benchmark)
 {
+    /// <summary>Part des fenêtres de test où la stratégie a fait mieux que l'achat-conservation.</summary>
+    public decimal OutperformingWindowShare =>
+        Windows.Count == 0 ? 0m : (decimal)Windows.Count(static w => (w.Test?.Metrics.TotalReturn ?? 0m) > w.BenchmarkReturn) / Windows.Count;
+
     /// <summary>Combinaisons essayées sur l'ensemble des fenêtres.</summary>
     public long Evaluated => Windows.Sum(static w => w.Training.Evaluated);
 
@@ -138,15 +150,28 @@ public sealed class WalkForward
                     Cache = cache,
                 });
 
-            played.Add(new WalkForwardWindow(trainFrom, trainTo, testFrom, testTo, training, selected, test));
+            var benchmark = BuyAndHold.Curve(optimization.Universe, testFrom, testTo, optimization.InitialCash);
+            var benchmarkReturn = benchmark.Count == 0 ? 0m : (benchmark[^1].Equity / optimization.InitialCash) - 1m;
+
+            played.Add(new WalkForwardWindow(trainFrom, trainTo, testFrom, testTo, training, selected, test, benchmark, benchmarkReturn));
         }
 
-        var (curve, trades, costs) = Stitch(played, calendar, optimization.InitialCash);
+        var curve = Chain(played.Select(w => w.Test is { EquityCurve.Count: > 0 } test
+            ? test.EquityCurve
+            : InCash(calendar.Slice(w.TestFrom, w.TestTo), optimization.InitialCash)), optimization.InitialCash);
+
+        // Les trades sont gardés tels quels : toutes les fenêtres partant du même capital, leurs
+        // gains et pertes sont comparables entre eux.
+        var trades = played.SelectMany(static w => w.Test?.Trades ?? []).ToArray();
+        var costs = played.Sum(static w => w.Test?.Metrics.TotalCosts ?? 0m);
+        var benchmarkCurve = Chain(played.Select(static w => w.Benchmark), optimization.InitialCash);
 
         return new WalkForwardReport(
             played,
             curve,
-            PerformanceCalculator.Calculate(curve, trades, optimization.InitialCash, costs));
+            PerformanceCalculator.Calculate(curve, trades, optimization.InitialCash, costs),
+            benchmarkCurve,
+            PerformanceCalculator.Calculate(benchmarkCurve, [], optimization.InitialCash, 0m));
     }
 
     /// <summary>
@@ -175,46 +200,32 @@ public sealed class WalkForward
     }
 
     /// <summary>
-    /// Met les fenêtres de test bout à bout. Chacune a été jouée avec le capital de départ ; sa
-    /// courbe est remise à l'échelle de l'actif où la précédente s'est arrêtée. Une fenêtre sans
-    /// combinaison retenue reste en liquidités, à plat.
-    /// <para>Les trades, eux, sont gardés tels quels : toutes les fenêtres partant du même
-    /// capital, leurs gains et pertes sont comparables entre eux.</para>
+    /// Met des courbes bout à bout. Chacune a été jouée avec le capital initial ; elle est
+    /// remise à l'échelle de l'actif où la précédente s'est arrêtée.
     /// </summary>
-    private static (List<EquityPoint> Curve, List<Trade> Trades, decimal Costs) Stitch(
-        IReadOnlyList<WalkForwardWindow> windows, TradingCalendar calendar, decimal initialCash)
+    private static List<EquityPoint> Chain(IEnumerable<IReadOnlyList<EquityPoint>> curves, decimal initialCash)
     {
-        var curve = new List<EquityPoint>();
-        var trades = new List<Trade>();
-        var costs = 0m;
+        var chained = new List<EquityPoint>();
         var equity = initialCash;
 
-        foreach (var window in windows)
+        foreach (var curve in curves.Where(static c => c.Count > 0))
         {
-            if (window.Test is not { EquityCurve.Count: > 0 } test)
-            {
-                foreach (var date in calendar.Slice(window.TestFrom, window.TestTo).Sessions)
-                {
-                    curve.Add(new EquityPoint(date, equity, equity, 0m));
-                }
+            var scale = equity / initialCash;
 
-                continue;
+            foreach (var point in curve)
+            {
+                chained.Add(new EquityPoint(point.Date, point.Equity * scale, point.Cash * scale, point.Invested * scale));
             }
 
-            var scale = equity / test.InitialCash;
-
-            foreach (var point in test.EquityCurve)
-            {
-                curve.Add(new EquityPoint(point.Date, point.Equity * scale, point.Cash * scale, point.Invested * scale));
-            }
-
-            equity = curve[^1].Equity;
-            trades.AddRange(test.Trades);
-            costs += test.Metrics.TotalCosts * scale;
+            equity = chained[^1].Equity;
         }
 
-        return (curve, trades, costs);
+        return chained;
     }
+
+    /// <summary>Une fenêtre sans combinaison retenue : l'actif reste en liquidités, à plat.</summary>
+    private static EquityPoint[] InCash(TradingCalendar sessions, decimal cash) =>
+        [.. sessions.Sessions.Select(date => new EquityPoint(date, cash, cash, 0m))];
 
     /// <summary>Rattache la progression d'une exploration à sa fenêtre.</summary>
     private sealed class WindowProgress(IProgress<WalkForwardProgress> inner, int window, int count) : IProgress<OptimizationProgress>

@@ -234,7 +234,7 @@ public static class BacktestCommands
             output.WriteLine();
 
             output.WriteTable(
-                ["Apprentissage", "Test", "Retenue", "Calmar appr.", "Rendement test", "Calmar test", "Trades test"],
+                ["Apprentissage", "Test", "Retenue", "Calmar appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
                 [
                     .. report.Windows.Select(w => new[]
                     {
@@ -243,29 +243,32 @@ public static class BacktestCommands
                         w.Selected?.Strategy.Name ?? "aucune — en liquidités",
                         w.Selected?.Score.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                         w.Test is null ? "—" : ConsoleWriter.Percent(w.Test.Metrics.TotalReturn),
+                        ConsoleWriter.Percent(w.BenchmarkReturn),
                         w.Test?.Metrics.Calmar.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                         w.Test?.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture) ?? "—",
                     }),
                 ]);
 
-            var oos = report.OutOfSample;
+            static string[] Row(string label, PerformanceMetrics metrics) =>
+            [
+                label,
+                ConsoleWriter.Percent(metrics.TotalReturn),
+                ConsoleWriter.Percent(metrics.AnnualisedReturn),
+                ConsoleWriter.Percent(metrics.MaxDrawdown),
+                metrics.Calmar.ToString("0.00", CultureInfo.CurrentCulture),
+                metrics.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+            ];
+
             output.WriteLine();
             output.WriteLine("Hors échantillon, fenêtres de test mises bout à bout :");
             output.WriteTable(
-                ["Rendement", "Annualisé", "Pire baisse", "Calmar", "Sharpe", "Trades", "Fenêtres gagnantes", "Efficacité"],
-                [[
-                    ConsoleWriter.Percent(oos.TotalReturn),
-                    ConsoleWriter.Percent(oos.AnnualisedReturn),
-                    ConsoleWriter.Percent(oos.MaxDrawdown),
-                    oos.Calmar.ToString("0.00", CultureInfo.CurrentCulture),
-                    oos.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
-                    oos.TradeCount.ToString(CultureInfo.CurrentCulture),
-                    ConsoleWriter.Percent(report.ProfitableWindowShare),
-                    report.Efficiency?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
-                ]]);
+                ["", "Rendement", "Annualisé", "Pire baisse", "Calmar", "Sharpe"],
+                [Row("Stratégie", report.OutOfSample), Row("Acheter et conserver", report.Benchmark)]);
 
             output.WriteLine();
-            output.WriteLine($"{report.Evaluated:N0} combinaisons essayées au total. Efficacité : rendement annualisé en test rapporté à celui de l'apprentissage.");
+            output.WriteLine($"Fenêtres gagnantes : {ConsoleWriter.Percent(report.ProfitableWindowShare)}. Fenêtres au-dessus du marché : {ConsoleWriter.Percent(report.OutperformingWindowShare)}. Trades : {report.OutOfSample.TradeCount:N0}.");
+            output.WriteLine($"Efficacité (rendement annualisé en test rapporté à l'apprentissage) : {report.Efficiency?.ToString("0.00", CultureInfo.CurrentCulture) ?? "indéfinie"}.");
+            output.WriteLine($"{report.Evaluated:N0} combinaisons essayées au total.");
 
             return 0;
         });
