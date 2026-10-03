@@ -41,6 +41,7 @@ fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n
 | `algo data list` | Instruments connus et étendue de leur historique. |
 | `algo data gaps` | Séances manquantes et **ruptures de cours**. |
 | `algo backtest run --strategy <fichier>` | Exécute une stratégie (`--save`, `--from`, `--to`, `--cash`). |
+| `algo backtest screen --rules <fichier>` | Joue chaque variante seule et la juge avec ses voisines de grille (`--top-per-indicator`, `--export`). |
 | `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`, `--min-trades`, `--sample`, `--seed`). |
 | `algo backtest walk-forward --rules <fichier>` | Optimise sur une fenêtre, juge le gagnant sur la suivante (`--train-months`, `--test-months`, `--to`). |
 | `algo backtest compare --runs 12,17` | Compare des résultats enregistrés. |
@@ -77,12 +78,24 @@ classe que les combinaisons d'au moins `--min-trades` trades (20 par défaut), e
 tire `n` combinaisons uniformément, sans remise et de façon reproductible (`--seed`), au lieu de
 tout parcourir. Une combinaison coûte environ 0,25 s de CPU sur le CAC 40 complet.
 
+`screen` est le premier étage de l'entonnoir. Chaque variante y est jouée seule, puis jugée
+avec ses voisines : même règle, un seul réglage décalé d'un cran dans la grille. Le classement,
+indicateur par indicateur, se fait sur le *voisinage* (le Calmar moyen de la variante et de ses
+voisines), car un plateau dit quelque chose du marché alors qu'un pic isolé ne dit rien de plus
+qu'une coïncidence. `--export` écrit les meilleures variantes de chaque indicateur en
+catalogue, prêt pour l'étage suivant.
+
 ```bash
-# Criblage : chaque variante seule, pour repérer les plateaux de paramètres
-algo backtest optimize --rules rules/screening.json --min-k 1 --max-k 1 --top 50
-# Combinaison : 20 000 tirages parmi les combinaisons de 2 à 4 règles
-algo backtest optimize --rules rules/screening.json --sample 20000
+# Criblage : les plateaux de paramètres, indicateur par indicateur
+algo backtest screen --rules rules/screening.json --to 2019-12-31 --export rules/retained.json
+# Combinaison : 20 000 tirages parmi les combinaisons de 2 à 4 règles retenues
+algo backtest optimize --rules rules/retained.json --sample 20000 --to 2019-12-31
 ```
+
+Un criblage voit les séances qu'il couvre. S'il couvre aussi les fenêtres de test d'un
+walk-forward mené ensuite sur son export, ces tests ne sont plus hors échantillon. Il faut donc
+arrêter le criblage avant la première fenêtre de test, ou passer le catalogue complet au
+walk-forward.
 
 Le rapport donne le nombre de combinaisons réellement essayées. Il faudra en tenir compte pour
 corriger le meilleur score de la chance accumulée au fil des essais.

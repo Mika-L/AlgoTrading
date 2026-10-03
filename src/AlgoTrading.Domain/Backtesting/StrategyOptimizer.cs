@@ -226,7 +226,7 @@ public sealed class StrategyOptimizer
     /// Nom lisible d'une règle, assez précis pour distinguer deux variantes :
     /// <c>Rsi(14) 30/70</c>, <c>Ema(9,20)</c>.
     /// </summary>
-    private static string Label(RuleConfig rule)
+    internal static string Label(RuleConfig rule)
     {
         var name = rule.Parameters.Count == 0
             ? rule.Indicator

@@ -45,21 +45,7 @@ public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var symbols = request.Universe;
-
-        if (symbols.Count == 0)
-        {
-            var known = await repository.ListInstrumentsAsync(cancellationToken).ConfigureAwait(false);
-            symbols = [.. known.Select(static i => i.Symbol)];
-        }
-
-        var universe = await repository.LoadUniverseAsync(symbols, request.From, request.To, cancellationToken).ConfigureAwait(false);
-        var tradable = universe.Where(static s => !s.IsEmpty).ToArray();
-
-        if (tradable.Length == 0)
-        {
-            throw new InvalidOperationException("Aucune cotation dans la plage demandée.");
-        }
+        var tradable = await repository.LoadTradableAsync(request.Universe, request.From, request.To, cancellationToken).ConfigureAwait(false);
 
         // L'exploration est synchrone et longue : elle ne doit pas occuper le fil de l'appelant.
         return await Task.Run(

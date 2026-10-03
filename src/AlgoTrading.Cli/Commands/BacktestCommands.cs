@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Globalization;
+using System.Text.Json;
 using AlgoTrading.Application.Ports;
 using AlgoTrading.Application.UseCases;
 using AlgoTrading.Domain.Backtesting;
@@ -16,6 +17,7 @@ public static class BacktestCommands
         var backtest = new Command("backtest", "Exécution et comparaison de backtests.");
 
         backtest.Add(Run(services));
+        backtest.Add(Screen(services));
         backtest.Add(Optimize(services));
         backtest.Add(WalkForward(services));
         backtest.Add(Compare(services));
@@ -169,6 +171,103 @@ public static class BacktestCommands
             {
                 output.WriteLine();
                 output.WriteLine($"Résultats enregistrés sous les numéros {string.Join(", ", response.SavedRunIds)}.");
+            }
+
+            return 0;
+        });
+
+        return command;
+    }
+
+    private static Command Screen(IServiceProvider services)
+    {
+        var rules = new Option<FileInfo?>("--rules") { Description = "Catalogue de règles, plages comprises ; par défaut, les douze indicateurs directionnels." };
+        var perIndicator = new Option<int>("--top-per-indicator") { Description = "Variantes affichées, et exportées, par indicateur.", DefaultValueFactory = _ => 3 };
+        var minTrades = new Option<int>("--min-trades") { Description = "En deçà, une variante compte pour zéro dans son voisinage.", DefaultValueFactory = _ => 20 };
+        var export = new Option<FileInfo?>("--export") { Description = "Écrit les variantes retenues en catalogue, prêt pour optimize ou walk-forward." };
+        var parallel = new Option<bool>("--parallel") { Description = "Répartit l'exploration sur tous les cœurs.", DefaultValueFactory = _ => true };
+        var from = new Option<DateOnly?>("--from") { Description = "Première séance." };
+        var to = new Option<DateOnly?>("--to") { Description = "Dernière séance." };
+        var cash = new Option<decimal>("--cash") { Description = "Capital de départ.", DefaultValueFactory = _ => 100_000m };
+
+        var command = new Command("screen", "Joue chaque variante seule et la juge avec ses voisines de grille, indicateur par indicateur.");
+        foreach (var option in new Option[] { rules, perIndicator, minTrades, export, parallel, from, to, cash })
+        {
+            command.Add(option);
+        }
+
+        command.SetAction(async (parse, cancellationToken) =>
+        {
+            var output = services.GetRequiredService<IConsoleWriter>();
+            // Vérifié avant le calcul, pas après : un chemin faux ne doit pas coûter un criblage.
+            if (parse.GetValue(export) is { Directory.Exists: false } unreachable)
+            {
+                output.WriteWarning($"Dossier d'export introuvable : {unreachable.DirectoryName}");
+                return 1;
+            }
+
+            var catalog = await ReadCatalogAsync(parse.GetValue(rules), output, cancellationToken).ConfigureAwait(false);
+
+            if (catalog is null)
+            {
+                return 1;
+            }
+
+            var report = await services.GetRequiredService<ScreenRulesHandler>().HandleAsync(
+                new ScreenRulesRequest
+                {
+                    Catalog = catalog,
+                    MinimumTrades = parse.GetValue(minTrades),
+                    From = parse.GetValue(from),
+                    To = parse.GetValue(to),
+                    InitialCash = parse.GetValue(cash),
+                    Parallel = parse.GetValue(parallel),
+                },
+                new ConsoleProgress(output),
+                cancellationToken).ConfigureAwait(false);
+
+            var shown = Math.Max(1, parse.GetValue(perIndicator));
+
+            output.WriteLine();
+            output.WriteLine("Voisinage : Calmar moyen de la variante et de ses voisines (un réglage décalé d'un cran).");
+            output.WriteLine($"Un plateau le garde proche du Calmar ; un pic isolé l'en éloigne. Moins de {parse.GetValue(minTrades)} trades compte pour zéro.");
+
+            foreach (var group in report.Groups)
+            {
+                output.WriteLine();
+                output.WriteLine($"{group.Indicator} — {group.Variants.Count} variantes");
+                output.WriteTable(
+                    ["Variante", "Voisinage", "Calmar", "Pire voisine", "Voisines", "Sharpe", "Trades"],
+                    [
+                        .. group.Variants.Take(shown).Select(v => new[]
+                        {
+                            v.Label,
+                            v.NeighbourhoodScore.ToString("0.00", CultureInfo.CurrentCulture),
+                            v.Score.ToString("0.00", CultureInfo.CurrentCulture) + (v.Eligible ? string.Empty : " *"),
+                            v.WorstNeighbour?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                            v.Neighbours.ToString(CultureInfo.CurrentCulture),
+                            v.Metrics.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+                            v.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
+                        }),
+                    ]);
+            }
+
+            output.WriteLine();
+            output.WriteLine($"{report.Evaluated:N0} variantes essayées. * : trop peu de trades pour être retenue.");
+
+            if (parse.GetValue(export) is { } target)
+            {
+                IReadOnlyList<RuleConfig> retained =
+                [
+                    .. report.Groups.SelectMany(g => g.Variants.Where(static v => v.Eligible).Take(shown)).Select(static v => v.Rule),
+                ];
+
+                await File.WriteAllTextAsync(
+                    target.FullName,
+                    JsonSerializer.Serialize(retained, StrategyJson.Default.IReadOnlyListRuleConfig),
+                    cancellationToken).ConfigureAwait(false);
+
+                output.WriteLine($"{retained.Count} variantes exportées dans {target.FullName}.");
             }
 
             return 0;
