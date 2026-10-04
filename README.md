@@ -13,6 +13,24 @@ dotnet run --project src/AlgoTrading.Cli -- data fetch --universe cac40 --from 2
 dotnet run --project src/AlgoTrading.Cli -- backtest run --strategy strategies/bollinger-rsi.json --save
 ```
 
+## Interface web
+
+```bash
+dotnet run --project src/AlgoTrading.Web    # http://localhost:5080
+```
+
+Une interface Blazor (rendu serveur) pour éditer les stratégies, lancer un backtest et en lire
+le résultat : mesures, courbe de valeur, drawdown, relevé de trades filtrable, comparaison de
+plusieurs runs en base 100. Elle travaille sur **la même configuration, la même base et les
+mêmes fichiers de stratégie** que la ligne de commande — ceux de `src/AlgoTrading.Cli` — si
+bien qu'un run lancé d'un côté se consulte de l'autre. La page Données télécharge un univers
+et signale les ruptures de cours.
+
+Seuls les chiffres de synthèse d'un run sont persistés : sa page le **rejoue** depuis la
+stratégie, la période, le capital et les titres enregistrés, et signale tout écart avec le
+résultat d'origine. Dans l'éditeur, les taux se saisissent en pour cent et redeviennent des
+fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n'a pas modifiée.
+
 ## Commandes
 
 | Commande | Rôle |
@@ -46,12 +64,15 @@ src/
   AlgoTrading.Application/     cas d'usage et ports
   AlgoTrading.Infrastructure/  EF Core / SQLite, Yahoo, CSV, ScottPlot
   AlgoTrading.Cli/             racine de composition et ligne de commande
+  AlgoTrading.Web/             racine de composition et interface Blazor
 tests/
   AlgoTrading.Domain.Tests/       indicateurs, règles, moteur, mesures
   AlgoTrading.Architecture.Tests/ frontières entre modules
+  AlgoTrading.Web.Tests/          formulaire de stratégie, bibliothèque de fichiers
 ```
 
-Dépendances : `Domain` ← `Application` ← `Infrastructure` ← `Cli`. Le domaine ne référence
+Dépendances : `Domain` ← `Application` ← `Infrastructure` ← `Cli` et `Web`. Le câblage commun aux
+deux points d'entrée est `AddAlgoTrading`, dans l'infrastructure. Le domaine ne référence
 aucun projet.
 
 **Ce qui tient les frontières.** Le domaine n'a aucun paquet d'infrastructure :

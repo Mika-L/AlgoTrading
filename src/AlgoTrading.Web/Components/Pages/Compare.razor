@@ -1,0 +1,135 @@
+@page "/compare"
+@inject ReplayBacktestRunHandler Replays
+
+<PageTitle>Comparaison · AlgoTrading</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Comparaison</h1>
+        <p class="muted">Valeurs ramenées à une base 100 au départ de chaque run : les capitaux initiaux peuvent différer.</p>
+    </div>
+    <a class="btn" href="">Retour aux backtests</a>
+</div>
+
+@if (_errors.Count > 0)
+{
+    <div class="notice error" style="margin-bottom:16px">
+        <ul>
+            @foreach (var error in _errors)
+            {
+                <li>@error</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (_loading)
+{
+    <p class="muted"><span class="spinner"></span> Rejeu de @_ids.Count runs…</p>
+}
+else if (_replays.Count > 0)
+{
+    <div class="card">
+        <h2>Valeur du portefeuille, base 100</h2>
+        <LineChart Series="_indexed" Baseline="100" FormatValue="@(static v => v.ToString("N0", CultureInfo.CurrentCulture))"
+                   AriaLabel="Valeur des portefeuilles comparés, base 100" />
+    </div>
+
+    <div class="card" style="padding:0">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Run</th>
+                        <th>Période</th>
+                        <th class="num">Rendement</th>
+                        <th class="num">Annualisé</th>
+                        <th class="num">Drawdown max</th>
+                        <th class="num">Calmar</th>
+                        <th class="num">Sharpe</th>
+                        <th class="num">Trades</th>
+                        <th class="num">Gagnants</th>
+                        <th class="num">Frais</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var (replay, slot) in _replays.Select(static (r, i) => (r, i)))
+                    {
+                        var metrics = replay.Replay.Result.Metrics;
+                        <tr>
+                            <td>
+                                <span class="legend-item">
+                                    <span class="swatch" style="background:var(--series-@(slot + 1))"></span>
+                                    <a href="runs/@replay.Summary.Id">@replay.Summary.Id · @replay.Summary.StrategyName</a>
+                                </span>
+                            </td>
+                            <td class="secondary">@Labels.Date(replay.Summary.From) → @Labels.Date(replay.Summary.To)</td>
+                            <td class="num">@Labels.SignedPercent(metrics.TotalReturn)</td>
+                            <td class="num">@Labels.SignedPercent(metrics.AnnualisedReturn)</td>
+                            <td class="num">@Labels.Percent(-metrics.MaxDrawdown)</td>
+                            <td class="num">@Labels.Number(metrics.Calmar)</td>
+                            <td class="num">@Labels.Number(metrics.Sharpe)</td>
+                            <td class="num">@metrics.TradeCount</td>
+                            <td class="num">@Labels.Percent(metrics.WinRate, 0)</td>
+                            <td class="num">@Labels.Money(metrics.TotalCosts)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<int> _ids = [];
+    private readonly List<ReplayBacktestRunResponse> _replays = [];
+    private readonly List<string> _errors = [];
+    private IReadOnlyList<ChartSeries> _indexed = [];
+    private bool _loading;
+
+    [SupplyParameterFromQuery(Name = "runs")]
+    public string? RunIds { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _ids = [.. (RunIds ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(static s => int.TryParse(s, out var id) ? id : 0)
+            .Where(static id => id > 0)
+            .Distinct()
+            .Take(8)];
+
+        _replays.Clear();
+        _errors.Clear();
+        _loading = true;
+
+        foreach (var id in _ids)
+        {
+            try
+            {
+                if (await Task.Run(() => Replays.HandleAsync(id)) is { } replay)
+                {
+                    _replays.Add(replay);
+                }
+                else
+                {
+                    _errors.Add($"Run {id} introuvable, ou sans stratégie enregistrée.");
+                }
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+            {
+                _errors.Add($"Run {id} : {exception.Message}");
+            }
+        }
+
+        _indexed =
+        [
+            .. _replays.Select(static (replay, slot) => new ChartSeries(
+                $"{replay.Summary.Id} · {replay.Summary.StrategyName}",
+                slot,
+                [.. replay.Replay.Result.EquityCurve.Select(p => new ChartPoint(p.Date, (double)(p.Equity / replay.Replay.Result.InitialCash * 100m)))])),
+        ];
+
+        _loading = false;
+    }
+}

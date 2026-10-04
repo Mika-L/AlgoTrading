@@ -1,0 +1,21 @@
+<th class="sortable @(Numeric ? "num" : null)" @onclick="() => OnSort.InvokeAsync(Key)"
+    aria-sort="@(Sort.Key == Key ? (Sort.Descending ? "descending" : "ascending") : "none")">
+    @Label@(Sort.Key == Key ? (Sort.Descending ? " ↓" : " ↑") : null)
+</th>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Key { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public SortState Sort { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<string> OnSort { get; set; }
+
+    [Parameter]
+    public bool Numeric { get; set; }
+}

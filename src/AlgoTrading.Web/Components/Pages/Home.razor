@@ -1,0 +1,98 @@
+@page "/"
+@inject IBacktestRunStore Runs
+@inject NavigationManager Navigation
+
+<PageTitle>Backtests · AlgoTrading</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Backtests</h1>
+        <p class="muted">Runs enregistrés, du plus récent au plus ancien. Cochez-en plusieurs pour les comparer.</p>
+    </div>
+    <div class="row">
+        <button class="btn" disabled="@(_selected.Count < 2)" @onclick="Compare">Comparer (@_selected.Count)</button>
+        <a class="btn primary" href="strategies">Lancer un backtest</a>
+    </div>
+</div>
+
+@if (_runs is null)
+{
+    <div class="empty"><span class="spinner"></span></div>
+}
+else if (_runs.Count == 0)
+{
+    <div class="card empty">
+        Aucun run enregistré. Ouvrez une <a href="strategies">stratégie</a>, lancez-la en cochant « Enregistrer le résultat ».
+    </div>
+}
+else
+{
+    <div class="card" style="padding:0">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width:32px"></th>
+                        <th>N°</th>
+                        <th>Stratégie</th>
+                        <th>Période</th>
+                        <th class="num">Rendement</th>
+                        <th class="num">Drawdown max</th>
+                        <th class="num">Calmar</th>
+                        <th class="num">Trades</th>
+                        <th class="num">Capital final</th>
+                        <th>Lancé le</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var run in _runs)
+                    {
+                        <tr>
+                            <td>
+                                <input type="checkbox" aria-label="Sélectionner le run @run.Id" checked="@_selected.Contains(run.Id)"
+                                       disabled="@(!_selected.Contains(run.Id) && _selected.Count >= MaxCompared)"
+                                       @onchange="e => Toggle(run.Id, (bool)e.Value!)" />
+                            </td>
+                            <td class="num"><a href="runs/@run.Id">@run.Id</a></td>
+                            <td>
+                                <a href="runs/@run.Id">@run.StrategyName</a>
+                                <div class="muted mono" title="Empreinte de la stratégie">@run.Fingerprint[..8]</div>
+                            </td>
+                            <td class="secondary">@Labels.Date(run.From) → @Labels.Date(run.To)</td>
+                            <td class="num @(run.TotalReturn >= 0 ? "good" : "bad")">@Labels.SignedPercent(run.TotalReturn)</td>
+                            <td class="num">@Labels.Percent(-run.MaxDrawdown)</td>
+                            <td class="num">@Labels.Number(run.Calmar)</td>
+                            <td class="num">@run.TradeCount</td>
+                            <td class="num">@Labels.Money(run.FinalEquity)</td>
+                            <td class="secondary">@run.RanAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Au-delà, la palette ne distingue plus les courbes de façon sûre.</summary>
+    private const int MaxCompared = 8;
+
+    private IReadOnlyList<BacktestRunSummary>? _runs;
+    private readonly List<int> _selected = [];
+
+    protected override async Task OnInitializedAsync() => _runs = await Runs.ListAsync(limit: 500);
+
+    private void Toggle(int id, bool selected)
+    {
+        if (selected)
+        {
+            _selected.Add(id);
+        }
+        else
+        {
+            _selected.Remove(id);
+        }
+    }
+
+    private void Compare() => Navigation.NavigateTo($"compare?runs={string.Join(',', _selected)}");
+}

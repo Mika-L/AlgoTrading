@@ -46,9 +46,11 @@ public sealed class SqliteBacktestRunStore(
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
+        // L'identifiant croît à chaque enregistrement : trier dessus, c'est trier par date de
+        // run. Trier sur RanAt échouerait — SQLite ne sait pas ordonner un DateTimeOffset.
         var rows = await context.Runs
             .AsNoTracking()
-            .OrderByDescending(r => r.RanAt)
+            .OrderByDescending(r => r.Id)
             .Take(limit)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -65,7 +67,6 @@ public sealed class SqliteBacktestRunStore(
         return row is null ? null : Summarise(row);
     }
 
-    /// <summary>Recharge la stratégie d'un run : un résultat reste rejouable à l'identique.</summary>
     public async Task<StrategyDefinition?> GetStrategyAsync(int id, CancellationToken cancellationToken = default)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -92,5 +93,8 @@ public sealed class SqliteBacktestRunStore(
         row.MaxDrawdown,
         row.Calmar,
         row.TradeCount,
-        row.RanAt);
+        row.RanAt)
+    {
+        Universe = row.Universe.Split(',', StringSplitOptions.RemoveEmptyEntries),
+    };
 }

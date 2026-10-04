@@ -1,0 +1,113 @@
+@page "/strategies"
+@inject IStrategyRepository Library
+
+<PageTitle>Stratégies · AlgoTrading</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Stratégies</h1>
+        <p class="muted">Les fichiers JSON que lit aussi <code>algo backtest run --strategy</code>.</p>
+    </div>
+    <a class="btn primary" href="strategies/new">Nouvelle stratégie</a>
+</div>
+
+@if (_entries is null)
+{
+    <div class="empty"><span class="spinner"></span></div>
+}
+else if (_entries.Count == 0)
+{
+    <div class="card empty">Aucune stratégie. <a href="strategies/new">Créez la première</a>.</div>
+}
+else
+{
+    <div class="card" style="padding:0">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Stratégie</th>
+                        <th>Fichier</th>
+                        <th>Entrée</th>
+                        <th>Sortie</th>
+                        <th>Protection</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _entries)
+                    {
+                        <tr>
+                            <td><a href="strategies/@entry.Key">@(entry.Strategy?.Name ?? entry.Key)</a></td>
+                            <td class="mono muted">@(entry.Key).json</td>
+                            @if (entry.Strategy is { } strategy)
+                            {
+                                <td>@Describe(strategy.Entry)</td>
+                                <td class="secondary">@(strategy.Exit is { } exit ? Describe(exit) : "Signal inverse de l'entrée")</td>
+                                <td class="secondary">@Protection(strategy.Risk)</td>
+                            }
+                            else
+                            {
+                                <td colspan="3"><span class="notice error">Illisible : @entry.Error</span></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Entry>? _entries;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var entries = new List<Entry>();
+
+        foreach (var key in await Library.ListAsync())
+        {
+            try
+            {
+                entries.Add(new Entry(key, StrategyDefinition.FromJson(await Library.ReadAsync(key) ?? string.Empty), null));
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.Text.Json.JsonException)
+            {
+                entries.Add(new Entry(key, null, exception.Message));
+            }
+        }
+
+        _entries = entries;
+    }
+
+    private static string Describe(SignalPolicy policy) =>
+        $"{Labels.Aggregation(policy.Mode)} · {string.Join(", ", policy.Rules.Select(static r => r.Indicator))}";
+
+    private static string Protection(RiskPolicy risk)
+    {
+        var parts = new List<string>();
+
+        if (risk.StopLoss is { } stop)
+        {
+            parts.Add($"stop {Labels.Percent(stop, 0)}");
+        }
+
+        if (risk.TakeProfit is { } take)
+        {
+            parts.Add($"objectif {Labels.Percent(take, 0)}");
+        }
+
+        if (risk.TrailingRate is { } trailing)
+        {
+            parts.Add($"suiveur {Labels.Percent(trailing, 0)}");
+        }
+
+        if (risk.TrailingAtr is { } atr)
+        {
+            parts.Add($"suiveur {Labels.Number(atr.Multiple, 1)} ATR");
+        }
+
+        return parts.Count == 0 ? "Aucune" : string.Join(" · ", parts);
+    }
+
+    private sealed record Entry(string Key, StrategyDefinition? Strategy, string? Error);
+}

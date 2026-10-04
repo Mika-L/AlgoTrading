@@ -1,0 +1,32 @@
+<label class="field">
+    <span>@Label</span>
+    <select @key="Indicator?.Kind" value="@Value" @onchange="Change">
+        @if (Indicator is null || !Indicator.Lines.Contains(Value))
+        {
+            <option value="@Value">@Value (non produite)</option>
+        }
+        @if (Indicator is not null)
+        {
+            @foreach (var line in Indicator.Lines)
+            {
+                <option value="@line">@line</option>
+            }
+        }
+    </select>
+</label>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter]
+    public IndicatorInfo? Indicator { get; set; }
+
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    private Task Change(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString() ?? Value);
+}

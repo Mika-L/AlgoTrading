@@ -1,0 +1,259 @@
+@{
+    var metrics = Result.Metrics;
+}
+
+<div class="tiles">
+    <Tile Label="Rendement total" Value="@Labels.SignedPercent(metrics.TotalReturn)" Tone="@Tone(metrics.TotalReturn)"
+          Note="@($"{Labels.Money(Result.InitialCash)} → {Labels.Money(Result.FinalEquity)}")" />
+    <Tile Label="Annualisé" Value="@Labels.SignedPercent(metrics.AnnualisedReturn)" Tone="@Tone(metrics.AnnualisedReturn)" />
+    <Tile Label="Drawdown max" Value="@Labels.Percent(-metrics.MaxDrawdown)" Note="Pire repli depuis un sommet" />
+    <Tile Label="Calmar" Value="@Labels.Number(metrics.Calmar)" Note="Annualisé ÷ drawdown max" />
+    <Tile Label="Sharpe" Value="@Labels.Number(metrics.Sharpe)" Note="@($"Volatilité {Labels.Percent(metrics.Volatility)}")" />
+    <Tile Label="Trades" Value="@metrics.TradeCount.ToString("N0", CultureInfo.CurrentCulture)"
+          Note="@($"{Labels.Percent(metrics.WinRate, 0)} gagnants")" />
+    <Tile Label="Profit factor" Value="@Labels.Number(metrics.ProfitFactor)"
+          Note="@($"Gain moyen {Labels.Money(metrics.AverageWin)}, perte {Labels.Money(metrics.AverageLoss)}")" />
+    <Tile Label="Frais" Value="@Labels.Money(metrics.TotalCosts)" Note="Commissions et glissement" />
+</div>
+
+@if (Result.Caveats.Count > 0)
+{
+    <div class="notice warn" style="margin-bottom:16px">
+        <strong>Réserves</strong>
+        <ul>
+            @foreach (var caveat in Result.Caveats)
+            {
+                <li>@caveat</li>
+            }
+        </ul>
+    </div>
+}
+
+<div class="card">
+    <div class="card-header">
+        <h2>Valeur du portefeuille</h2>
+        <span class="muted">@Labels.Date(Result.From) → @Labels.Date(Result.To) · @Result.Universe.Count titres</span>
+    </div>
+    <LineChart Series="_equity" FormatValue="FormatMoney" AriaLabel="Valeur du portefeuille au fil du temps" />
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Drawdown</h2>
+        <span class="muted">Écart au plus haut atteint</span>
+    </div>
+    <LineChart Series="_drawdown" FormatValue="FormatPercent" Baseline="0" Height="180" AriaLabel="Drawdown au fil du temps" />
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Par titre</h2>
+        <span class="muted">@_bySymbol.Count titres traités · @Result.OpenPositions.Count positions ouvertes en fin de période · @Result.RejectedOrders.Count ordres rejetés</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Titre</th>
+                    <th class="num">Trades</th>
+                    <th class="num">Gagnants</th>
+                    <th class="num">Résultat net</th>
+                    <th class="num">Durée moyenne</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _bySymbol)
+                {
+                    <tr>
+                        <td><button class="btn ghost small" title="Filtrer les trades sur ce titre" @onclick="() => _symbolFilter = row.Symbol">@row.Symbol</button></td>
+                        <td class="num">@row.Count</td>
+                        <td class="num">@Labels.Percent(row.WinRate, 0)</td>
+                        <td class="num @Tone(row.NetPnL)">@Labels.Money(row.NetPnL)</td>
+                        <td class="num">@row.AverageDays.ToString("N0", CultureInfo.CurrentCulture) j</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Trades</h2>
+        <div class="row">
+            <select @bind="_symbolFilter" aria-label="Filtrer par titre" style="width:auto">
+                <option value="">Tous les titres</option>
+                @foreach (var row in _bySymbol.OrderBy(static r => r.Symbol, StringComparer.Ordinal))
+                {
+                    <option value="@row.Symbol">@row.Symbol</option>
+                }
+            </select>
+            <select @bind="_reasonFilter" aria-label="Filtrer par motif de sortie" style="width:auto">
+                <option value="">Tous les motifs</option>
+                @foreach (var reason in Enum.GetValues<ExecutionReason>())
+                {
+                    <option value="@reason">@Labels.Reason(reason)</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @{
+        var trades = FilteredTrades().ToList();
+    }
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <SortHeader Label="Titre" Key="symbol" Sort="_sort" OnSort="SortBy" />
+                    <SortHeader Label="Entrée" Key="opened" Sort="_sort" OnSort="SortBy" />
+                    <SortHeader Label="Sortie" Key="closed" Sort="_sort" OnSort="SortBy" />
+                    <SortHeader Label="Jours" Key="days" Sort="_sort" OnSort="SortBy" Numeric />
+                    <th class="num">Quantité</th>
+                    <th class="num">Prix d'entrée</th>
+                    <th class="num">Prix de sortie</th>
+                    <SortHeader Label="Résultat net" Key="pnl" Sort="_sort" OnSort="SortBy" Numeric />
+                    <th>Motif</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var trade in trades.Take(_visible))
+                {
+                    <tr>
+                        <td>@trade.Symbol</td>
+                        <td>@Labels.Date(trade.OpenedOn)</td>
+                        <td>@Labels.Date(trade.ClosedOn)</td>
+                        <td class="num">@trade.HoldingDays</td>
+                        <td class="num">@trade.Quantity.ToString("N0", CultureInfo.CurrentCulture)</td>
+                        <td class="num">@Labels.Number(trade.EntryPrice)</td>
+                        <td class="num">@Labels.Number(trade.ExitPrice)</td>
+                        <td class="num @Tone(trade.NetPnL)">@Labels.Money(trade.NetPnL, 2)</td>
+                        <td>@Labels.Reason(trade.ExitReason)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (trades.Count == 0)
+    {
+        <div class="empty">Aucun trade ne correspond.</div>
+    }
+    else if (trades.Count > _visible)
+    {
+        <div class="row" style="margin-top:12px">
+            <span class="muted">@_visible sur @trades.Count trades affichés</span>
+            <button class="btn small" @onclick="() => _visible += PageSize">Afficher @Math.Min(PageSize, trades.Count - _visible) de plus</button>
+        </div>
+    }
+</div>
+
+@code {
+    private const int PageSize = 50;
+
+    private IReadOnlyList<ChartSeries> _equity = [];
+    private IReadOnlyList<ChartSeries> _drawdown = [];
+    private List<SymbolRow> _bySymbol = [];
+    private string _symbolFilter = string.Empty;
+    private string _reasonFilter = string.Empty;
+    private SortState _sort = new("closed", Descending: true);
+    private int _visible = PageSize;
+    private BacktestResult? _rendered;
+
+    [Parameter, EditorRequired]
+    public BacktestResult Result { get; set; } = default!;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(_rendered, Result))
+        {
+            return;
+        }
+
+        _rendered = Result;
+        _visible = PageSize;
+        _symbolFilter = string.Empty;
+        _reasonFilter = string.Empty;
+
+        var curve = Result.EquityCurve;
+
+        _equity =
+        [
+            new ChartSeries("Valeur totale", 0, [.. curve.Select(static p => new ChartPoint(p.Date, (double)p.Equity))]),
+            new ChartSeries("Montant investi", 2, [.. curve.Select(static p => new ChartPoint(p.Date, (double)p.Invested))]),
+        ];
+
+        var peak = 0m;
+        var drawdown = new List<ChartPoint>(curve.Count);
+
+        foreach (var point in curve)
+        {
+            peak = Math.Max(peak, point.Equity);
+            drawdown.Add(new ChartPoint(point.Date, peak == 0m ? 0 : (double)((point.Equity / peak) - 1m)));
+        }
+
+        _drawdown = [new ChartSeries("Drawdown", 7, drawdown, Area: true)];
+
+        _bySymbol =
+        [
+            .. Result.Trades
+                .GroupBy(static t => t.Symbol.Ticker)
+                .Select(static g => new SymbolRow(
+                    g.Key,
+                    g.Count(),
+                    g.Count(static t => t.IsWinner) / (decimal)g.Count(),
+                    g.Sum(static t => t.NetPnL),
+                    g.Average(static t => t.HoldingDays)))
+                .OrderByDescending(static r => r.NetPnL),
+        ];
+    }
+
+    private IEnumerable<Trade> FilteredTrades()
+    {
+        var trades = Result.Trades.AsEnumerable();
+
+        if (_symbolFilter.Length > 0)
+        {
+            trades = trades.Where(t => t.Symbol.Ticker == _symbolFilter);
+        }
+
+        if (Enum.TryParse<ExecutionReason>(_reasonFilter, out var reason))
+        {
+            trades = trades.Where(t => t.ExitReason == reason);
+        }
+
+        Func<Trade, IComparable> key = _sort.Key switch
+        {
+            "symbol" => static t => t.Symbol.Ticker,
+            "opened" => static t => t.OpenedOn,
+            "days" => static t => t.HoldingDays,
+            "pnl" => static t => t.NetPnL,
+            _ => static t => t.ClosedOn,
+        };
+
+        return _sort.Descending ? trades.OrderByDescending(key) : trades.OrderBy(key);
+    }
+
+    private void SortBy(string key)
+    {
+        _sort = _sort.Key == key ? _sort with { Descending = !_sort.Descending } : new SortState(key, Descending: key is "pnl" or "days");
+        _visible = PageSize;
+    }
+
+    private static string? Tone(decimal value) => value switch
+    {
+        > 0m => "good",
+        < 0m => "bad",
+        _ => null,
+    };
+
+    private static string FormatMoney(double value) =>
+        Math.Abs(value) >= 1_000_000
+            ? (value / 1_000_000).ToString("N1", CultureInfo.CurrentCulture) + " M€"
+            : (value / 1_000).ToString("N0", CultureInfo.CurrentCulture) + " k€";
+
+    private static string FormatPercent(double value) => (value * 100).ToString("N1", CultureInfo.CurrentCulture) + " %";
+
+    private sealed record SymbolRow(string Symbol, int Count, decimal WinRate, decimal NetPnL, double AverageDays);
+}

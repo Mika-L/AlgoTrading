@@ -1,0 +1,282 @@
+@using System.Text
+
+<div class="chart">
+    @if (Series.Count >= 2)
+    {
+        <div class="legend">
+            @foreach (var series in Series)
+            {
+                <span class="legend-item"><span class="swatch" style="background:@series.Color"></span>@series.Name</span>
+            }
+        </div>
+    }
+
+    @if (_hasData)
+    {
+        <svg viewBox="0 0 @Width @Height" role="img" aria-label="@AriaLabel" @onmouseleave="() => _hover = null">
+            @foreach (var tick in _yTicks)
+            {
+                var y = Y(tick);
+                // Dans un élément, <text> est la balise SVG et non la directive Razor.
+                <g>
+                    <line class="grid-line" x1="@Fmt(Left)" x2="@Fmt(Width - Right)" y1="@Fmt(y)" y2="@Fmt(y)" />
+                    <text class="axis-label" x="@Fmt(Left - 8)" y="@Fmt(y + 4)" text-anchor="end">@FormatValue(tick)</text>
+                </g>
+            }
+
+            @if (Baseline is { } baseline && baseline >= _yMin && baseline <= _yMax)
+            {
+                <line class="baseline" x1="@Fmt(Left)" x2="@Fmt(Width - Right)" y1="@Fmt(Y(baseline))" y2="@Fmt(Y(baseline))" />
+            }
+
+            @foreach (var (date, label) in _xTicks)
+            {
+                <g><text class="axis-label" x="@Fmt(X(date))" y="@Fmt(Height - 6)" text-anchor="middle">@label</text></g>
+            }
+
+            @foreach (var series in Series)
+            {
+                if (series.Area)
+                {
+                    <path class="area" d="@AreaPath(series)" style="fill:@series.Color" />
+                }
+
+                <path class="series" d="@LinePath(series)" style="stroke:@series.Color" />
+            }
+
+            @if (_hover is { } hover)
+            {
+                <line class="crosshair" x1="@Fmt(X(hover.Date))" x2="@Fmt(X(hover.Date))" y1="@Fmt(Top)" y2="@Fmt(Height - Bottom)" />
+
+                foreach (var (series, point) in hover.Points)
+                {
+                    <circle class="marker" cx="@Fmt(X(point.Date))" cy="@Fmt(Y(point.Value))" r="4.5" style="fill:@series.Color" />
+                }
+            }
+
+            @for (var i = 0; i < Slices; i++)
+            {
+                var slice = i;
+                <rect class="hit" x="@Fmt(Left + (slice * SliceWidth))" y="@Fmt(Top)" width="@Fmt(SliceWidth + 0.5)" height="@Fmt(Height - Top - Bottom)"
+                      @onmouseover="() => Hover(slice)" />
+            }
+        </svg>
+
+        @if (_hover is { } tip)
+        {
+            var left = X(tip.Date) / Width * 100;
+            <div class="tooltip @(left > 62 ? "flip" : null)" style="left:@Fmt(left)%">
+                <div class="tooltip-date">@Labels.Date(tip.Date)</div>
+                @foreach (var (series, point) in tip.Points)
+                {
+                    <div class="tooltip-row">
+                        <span class="swatch dot" style="background:@series.Color"></span>
+                        <span>@series.Name</span>
+                        <strong>@FormatValue(point.Value)</strong>
+                    </div>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <div class="empty">Aucune donnée à tracer.</div>
+    }
+</div>
+
+@code {
+    private const double Width = 960;
+    private const double Left = 72;
+    private const double Right = 16;
+    private const double Top = 12;
+    private const double Bottom = 26;
+
+    // Le survol passe par des bandes verticales plutôt que par la position du pointeur :
+    // elles vivent dans le repère du dessin et restent justes quelle que soit la largeur rendue.
+    private const int Slices = 240;
+
+    private double _yMin;
+    private double _yMax;
+    private int _xMin;
+    private int _xMax;
+    private bool _hasData;
+    private List<double> _yTicks = [];
+    private List<(DateOnly Date, string Label)> _xTicks = [];
+    private HoverState? _hover;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+
+    [Parameter]
+    public Func<double, string> FormatValue { get; set; } = static v => v.ToString("N0", CultureInfo.CurrentCulture);
+
+    /// <summary>Ligne de référence tracée en plus de la grille : zéro, ou la base 100 d'une comparaison.</summary>
+    [Parameter]
+    public double? Baseline { get; set; }
+
+    [Parameter]
+    public double Height { get; set; } = 300;
+
+    [Parameter]
+    public string AriaLabel { get; set; } = "Graphique";
+
+    private double SliceWidth => (Width - Left - Right) / Slices;
+
+    protected override void OnParametersSet()
+    {
+        _hover = null;
+        var points = Series.SelectMany(static s => s.Points).ToList();
+        _hasData = points.Count >= 2;
+
+        if (!_hasData)
+        {
+            return;
+        }
+
+        _xMin = points.Min(static p => p.Date.DayNumber);
+        _xMax = Math.Max(points.Max(static p => p.Date.DayNumber), _xMin + 1);
+
+        var low = points.Min(static p => p.Value);
+        var high = points.Max(static p => p.Value);
+
+        if (Baseline is { } baseline)
+        {
+            low = Math.Min(low, baseline);
+            high = Math.Max(high, baseline);
+        }
+
+        if (high - low < 1e-9)
+        {
+            high = low + 1;
+        }
+
+        var step = NiceStep((high - low) / 5);
+        _yMin = Math.Floor(low / step) * step;
+        _yMax = Math.Ceiling(high / step) * step;
+        _yTicks = [];
+
+        for (var tick = _yMin; tick <= _yMax + (step / 2); tick += step)
+        {
+            _yTicks.Add(Math.Round(tick, 10));
+        }
+
+        _xTicks = XTicks();
+    }
+
+    private double X(DateOnly date) => Left + ((date.DayNumber - _xMin) / (double)(_xMax - _xMin) * (Width - Left - Right));
+
+    private double Y(double value) => Top + ((_yMax - value) / (_yMax - _yMin) * (Height - Top - Bottom));
+
+    private string LinePath(ChartSeries series)
+    {
+        var path = new StringBuilder(series.Points.Count * 16);
+
+        for (var i = 0; i < series.Points.Count; i++)
+        {
+            var point = series.Points[i];
+            path.Append(i == 0 ? 'M' : 'L').Append(Fmt(X(point.Date))).Append(',').Append(Fmt(Y(point.Value)));
+        }
+
+        return path.ToString();
+    }
+
+    /// <summary>Surface comprise entre la série et la ligne de référence — zéro par défaut.</summary>
+    private string AreaPath(ChartSeries series)
+    {
+        if (series.Points.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var floor = Fmt(Y(Math.Clamp(Baseline ?? 0, _yMin, _yMax)));
+        var first = series.Points[0];
+        var last = series.Points[^1];
+
+        return $"M{Fmt(X(first.Date))},{floor}{LinePath(series).Replace('M', 'L')}L{Fmt(X(last.Date))},{floor}Z";
+    }
+
+    private void Hover(int slice)
+    {
+        var day = _xMin + (int)Math.Round((slice + 0.5) / Slices * (_xMax - _xMin));
+        var target = DateOnly.FromDayNumber(day);
+
+        var points = Series
+            .Where(static s => s.Points.Count > 0)
+            .Select(s => (s, Nearest(s.Points, target)))
+            .ToList();
+
+        _hover = points.Count == 0 ? null : new HoverState(points[0].Item2.Date, points);
+    }
+
+    private static ChartPoint Nearest(IReadOnlyList<ChartPoint> points, DateOnly date)
+    {
+        int low = 0, high = points.Count - 1;
+
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+
+            if (points[middle].Date < date)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        if (low > 0 && date.DayNumber - points[low - 1].Date.DayNumber < points[low].Date.DayNumber - date.DayNumber)
+        {
+            low--;
+        }
+
+        return points[low];
+    }
+
+    private List<(DateOnly, string)> XTicks()
+    {
+        var from = DateOnly.FromDayNumber(_xMin);
+        var to = DateOnly.FromDayNumber(_xMax);
+        var years = to.Year - from.Year;
+        var ticks = new List<(DateOnly, string)>();
+
+        if (years >= 2)
+        {
+            var every = years > 12 ? 2 : 1;
+
+            for (var year = from.Year + 1; year <= to.Year; year += every)
+            {
+                ticks.Add((new DateOnly(year, 1, 1), year.ToString(CultureInfo.InvariantCulture)));
+            }
+        }
+        else
+        {
+            for (var month = new DateOnly(from.Year, from.Month, 1).AddMonths(1); month <= to; month = month.AddMonths(years >= 1 ? 3 : 1))
+            {
+                ticks.Add((month, month.ToString("MMM yy", CultureInfo.CurrentCulture)));
+            }
+        }
+
+        return ticks;
+    }
+
+    private static double NiceStep(double rough)
+    {
+        var magnitude = Math.Pow(10, Math.Floor(Math.Log10(rough)));
+        var normalized = rough / magnitude;
+
+        return magnitude * normalized switch
+        {
+            <= 1 => 1,
+            <= 2 => 2,
+            <= 2.5 => 2.5,
+            <= 5 => 5,
+            _ => 10,
+        };
+    }
+
+    private static string Fmt(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private sealed record HoverState(DateOnly Date, List<(ChartSeries Series, ChartPoint Point)> Points);
+}

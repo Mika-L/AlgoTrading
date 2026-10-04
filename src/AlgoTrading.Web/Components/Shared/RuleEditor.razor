@@ -1,0 +1,196 @@
+@using AlgoTrading.Domain.Strategies.Rules
+@inject IndicatorLineCatalog Catalog
+
+@{
+    var indicator = Catalog.Find(Rule.Indicator);
+}
+
+<div class="rule">
+    <div class="rule-head">
+        <span class="rule-index">@(Index + 1)</span>
+        <strong>@Rule.Indicator</strong>
+        <span class="muted">@Labels.RuleType(Rule.Type)</span>
+        <span class="spacer"></span>
+        <button class="btn ghost small" title="Monter" disabled="@(Index == 0)" @onclick="() => OnMove.InvokeAsync(-1)">↑</button>
+        <button class="btn ghost small" title="Descendre" disabled="@IsLast" @onclick="() => OnMove.InvokeAsync(1)">↓</button>
+        <button class="btn ghost small danger" @onclick="OnRemove">Retirer</button>
+    </div>
+
+    <div class="fields">
+        <label class="field">
+            <span>Type de règle</span>
+            <select value="@Rule.Type" @onchange="ChangeType">
+                @foreach (var (type, label, _) in Labels.RuleTypes)
+                {
+                    <option value="@type">@label</option>
+                }
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Indicateur</span>
+            @* Recréée quand ses options changent : un select dont seules les options changent
+               garde sa sélection précédente, sans égard pour la valeur liée. *@
+            <select @key="Rule.Type" value="@Rule.Indicator" @onchange="ChangeIndicator">
+                @if (indicator is null)
+                {
+                    <option value="@Rule.Indicator">@Rule.Indicator (inconnu)</option>
+                }
+                @foreach (var candidate in Catalog.CompatibleWith(Rule.Type))
+                {
+                    <option value="@candidate.Kind">@candidate.Kind</option>
+                }
+            </select>
+        </label>
+
+        @if (indicator is not null)
+        {
+            @foreach (var parameter in indicator.Defaults)
+            {
+                var name = parameter.Name;
+                <label class="field">
+                    <span>@name</span>
+                    <input type="number" step="any" value="@Invariant(Rule.Parameters.GetValueOrDefault(name, parameter.Value))"
+                           @onchange="e => SetParameter(name, e.Value)" />
+                </label>
+            }
+        }
+
+        @switch (Rule.Type)
+        {
+            case ThresholdRule.Type:
+                <LineSelect Label="Ligne lue" Indicator="indicator" @bind-Value="Rule.Line" @bind-Value:after="Changed" />
+                <label class="field">
+                    <span>Haussier sous</span>
+                    <input type="number" step="any" @bind="Rule.BullishBelow" @bind:after="Changed" />
+                </label>
+                <label class="field">
+                    <span>Baissier au-dessus de</span>
+                    <input type="number" step="any" @bind="Rule.BearishAbove" @bind:after="Changed" />
+                </label>
+                break;
+
+            case CrossoverRule.Type:
+                <LineSelect Label="Ligne rapide" Indicator="indicator" @bind-Value="Rule.FastLine" @bind-Value:after="Changed" />
+                <LineSelect Label="Ligne lente" Indicator="indicator" @bind-Value="Rule.SlowLine" @bind-Value:after="Changed" />
+                <label class="field">
+                    <span>Se prononce</span>
+                    <select @bind="Rule.CrossoverMode" @bind:after="Changed">
+                        @foreach (var mode in Enum.GetValues<CrossoverMode>())
+                        {
+                            <option value="@mode">@Labels.Crossover(mode)</option>
+                        }
+                    </select>
+                </label>
+                break;
+
+            case BandBreakoutRule.Type:
+                <label class="field">
+                    <span>Lecture</span>
+                    <select value="@Flag(Rule.MeanReverting)" @onchange="e => SetFlag(e, v => Rule.MeanReverting = v)">
+                        <option value="true">Retour à la moyenne</option>
+                        <option value="false">Suivi de tendance</option>
+                    </select>
+                </label>
+                break;
+
+            case PriceVsLevelRule.Type:
+                <LineSelect Label="Niveau" Indicator="indicator" @bind-Value="Rule.Line" @bind-Value:after="Changed" />
+                <label class="field">
+                    <span>Haussier quand la clôture est</span>
+                    <select value="@Flag(Rule.BullishWhenAbove)" @onchange="e => SetFlag(e, v => Rule.BullishWhenAbove = v)">
+                        <option value="true">au-dessus</option>
+                        <option value="false">au-dessous</option>
+                    </select>
+                </label>
+                break;
+
+            case SignRule.Type:
+                <LineSelect Label="Ligne lue" Indicator="indicator" @bind-Value="Rule.Line" @bind-Value:after="Changed" />
+                <label class="field">
+                    <span>Pivot</span>
+                    <input type="number" step="any" @bind="Rule.Pivot" @bind:after="Changed" />
+                </label>
+                break;
+        }
+
+        @if (ShowWeight)
+        {
+            <label class="field">
+                <span>Poids</span>
+                <input type="number" step="any" min="0" @bind="Rule.Weight" @bind:after="Changed" />
+            </label>
+        }
+    </div>
+
+    <div class="row" style="margin-top:10px">
+        <label class="check" title="Une règle d'état ne vote alors qu'au moment où elle bascule.">
+            <input type="checkbox" @bind="Rule.AsEvent" @bind:after="Changed" /> Seulement au basculement
+        </label>
+    </div>
+
+    <p class="rule-hint">@Labels.RuleHint(Rule.Type)</p>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RuleForm Rule { get; set; } = default!;
+
+    [Parameter]
+    public int Index { get; set; }
+
+    [Parameter]
+    public bool IsLast { get; set; }
+
+    /// <summary>Le poids ne compte que dans une agrégation pondérée.</summary>
+    [Parameter]
+    public bool ShowWeight { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnRemove { get; set; }
+
+    [Parameter]
+    public EventCallback<int> OnMove { get; set; }
+
+    private Task Changed() => OnChanged.InvokeAsync();
+
+    private Task ChangeType(ChangeEventArgs e)
+    {
+        Rule.ChangeType(e.Value?.ToString() ?? Rule.Type, Catalog);
+        return Changed();
+    }
+
+    private Task ChangeIndicator(ChangeEventArgs e)
+    {
+        if (Catalog.Find(e.Value?.ToString() ?? string.Empty) is { } indicator)
+        {
+            Rule.ChangeIndicator(indicator);
+        }
+
+        return Changed();
+    }
+
+    private Task SetParameter(string name, object? value)
+    {
+        if (decimal.TryParse(value?.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var number))
+        {
+            Rule.Parameters[name] = number;
+        }
+
+        return Changed();
+    }
+
+    // Une liaison directe écrirait « True » et ne retrouverait pas l'option « true ».
+    private static string Flag(bool value) => value ? "true" : "false";
+
+    private Task SetFlag(ChangeEventArgs e, Action<bool> set)
+    {
+        set(string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase));
+        return Changed();
+    }
+
+    private static string Invariant(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+}

@@ -1,0 +1,514 @@
+@page "/strategies/new"
+@page "/strategies/{Key}"
+@using System.Text.Json
+@using AlgoTrading.Infrastructure.Strategies
+@inject IStrategyRepository Library
+@inject IBacktestRunStore Runs
+@inject IMarketDataRepository MarketData
+@inject RunBacktestHandler Backtests
+@inject IndicatorLineCatalog Catalog
+@inject NavigationManager Navigation
+
+<PageTitle>@(string.IsNullOrWhiteSpace(_form?.Name) ? "Nouvelle stratégie" : _form.Name) · AlgoTrading</PageTitle>
+
+@if (_loadError is not null)
+{
+    <h1>@(Key ?? "Nouvelle stratégie")</h1>
+    <div class="notice error" style="margin-bottom:16px">@_loadError</div>
+    @if (_rawJson is not null)
+    {
+        <div class="card">
+            <h2>Contenu du fichier</h2>
+            <pre class="code-block">@_rawJson</pre>
+        </div>
+    }
+    return;
+}
+
+@if (_form is null)
+{
+    <div class="empty"><span class="spinner"></span></div>
+    return;
+}
+
+@{
+    var check = Check();
+}
+
+<div class="page-header">
+    <div>
+        <h1>@(string.IsNullOrWhiteSpace(_form.Name) ? "Nouvelle stratégie" : _form.Name)</h1>
+        <p class="muted">
+            @if (Key is null)
+            {
+                <span>Pas encore enregistrée</span>
+            }
+            else
+            {
+                <span class="mono">@(Key).json</span>
+                @if (IsDirty(check))
+                {
+                    <span class="badge" style="margin-left:8px">Modifications non enregistrées</span>
+                }
+            }
+        </p>
+    </div>
+    <div class="row">
+        @if (Key is not null)
+        {
+            <a class="btn" href="strategies/new?from=@Key">Dupliquer</a>
+            @if (_confirmDelete)
+            {
+                <button class="btn danger" @onclick="Delete">Confirmer la suppression</button>
+                <button class="btn" @onclick="() => _confirmDelete = false">Annuler</button>
+            }
+            else
+            {
+                <button class="btn danger" @onclick="() => _confirmDelete = true">Supprimer</button>
+            }
+        }
+        <button class="btn primary" disabled="@(check.Definition is null || _saving)" @onclick="() => Save(check)">Enregistrer</button>
+    </div>
+</div>
+
+@if (_saveMessage is not null)
+{
+    <div class="notice @(_saveFailed ? "error" : "ok")" style="margin-bottom:16px">@_saveMessage</div>
+}
+
+<div class="editor-layout">
+    <div>
+        <div class="card">
+            <h2>Général</h2>
+            <div class="fields">
+                <label class="field" style="grid-column: span 2">
+                    <span>Nom</span>
+                    <input @bind="_form.Name" @bind:event="oninput" placeholder="Bollinger et RSI" />
+                    @if (Key is null && !string.IsNullOrWhiteSpace(_form.Name))
+                    {
+                        <small>Sera enregistrée sous <span class="mono">@(JsonFileStrategyRepository.KeyFor(_form.Name)).json</span></small>
+                    }
+                </label>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Entrée</h2>
+                <span class="muted">Les règles votent ; l'agrégation décide.</span>
+            </div>
+            <SignalPolicyEditor Policy="_form.Entry" OnChanged="StateHasChanged" />
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Sortie</h2>
+                <label class="check">
+                    <input type="checkbox" @bind="_form.HasExit" /> Règles de sortie dédiées
+                </label>
+            </div>
+            @if (_form.HasExit)
+            {
+                <SignalPolicyEditor Policy="_form.Exit" OnChanged="StateHasChanged" />
+            }
+            else
+            {
+                <p class="muted" style="margin:0">La position se solde sur le signal inverse de l'entrée.</p>
+            }
+        </div>
+
+        <div class="card">
+            <h2>Dimensionnement et exécution</h2>
+            <div class="fields">
+                <label class="field">
+                    <span>Taille d'une position</span>
+                    <select value="@_form.SizingMode" @onchange="ChangeSizing">
+                        @foreach (var mode in Enum.GetValues<SizingMode>())
+                        {
+                            <option value="@mode">@Labels.Sizing(mode)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field">
+                    <span>@(_form.SizingMode == SizingMode.EquityFraction ? "Part de la valeur totale" : "Montant par position")</span>
+                    <div class="suffix" data-suffix="@(_form.SizingMode == SizingMode.EquityFraction ? "%" : "€")">
+                        <input type="number" step="any" min="0" @bind="_form.SizingInput" />
+                    </div>
+                </label>
+                <label class="field">
+                    <span>Commission</span>
+                    <div class="suffix" data-suffix="%"><input type="number" step="any" min="0" @bind="_form.CommissionPercent" /></div>
+                </label>
+                <label class="field">
+                    <span>Commission minimale</span>
+                    <div class="suffix" data-suffix="€"><input type="number" step="any" min="0" @bind="_form.MinimumCommission" /></div>
+                </label>
+                <label class="field">
+                    <span>Glissement</span>
+                    <div class="suffix" data-suffix="%"><input type="number" step="any" min="0" @bind="_form.SlippagePercent" /></div>
+                </label>
+                <label class="field">
+                    <span>Validité d'un ordre</span>
+                    <div class="suffix" data-suffix="j"><input type="number" step="1" min="1" @bind="_form.OrderValidityDays" /></div>
+                    <small>En séances</small>
+                </label>
+                <label class="field">
+                    <span>Sur signal de sortie</span>
+                    <select @bind="_form.ExitMode">
+                        @foreach (var mode in Enum.GetValues<ExitMode>())
+                        {
+                            <option value="@mode">@Labels.Exit(mode)</option>
+                        }
+                    </select>
+                </label>
+                @if (_form.ExitMode == ExitMode.Fraction)
+                {
+                    <label class="field">
+                        <span>Fraction soldée</span>
+                        <div class="suffix" data-suffix="%"><input type="number" step="any" min="0" max="100" @bind="_form.ExitFractionPercent" /></div>
+                    </label>
+                }
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Protection</h2>
+                <span class="muted">Vides, inactifs. Cumulables : le plus protecteur parle.</span>
+            </div>
+            <div class="fields">
+                <label class="field">
+                    <span>Stop de protection</span>
+                    <div class="suffix" data-suffix="%"><input type="number" step="any" min="0" max="100" placeholder="—" @bind="_form.StopLossPercent" /></div>
+                    <small>Sous le prix de revient</small>
+                </label>
+                <label class="field">
+                    <span>Prise de bénéfice</span>
+                    <div class="suffix" data-suffix="%"><input type="number" step="any" min="0" placeholder="—" @bind="_form.TakeProfitPercent" /></div>
+                    <small>Au-dessus du prix de revient</small>
+                </label>
+                <label class="field">
+                    <span>Stop suiveur</span>
+                    <div class="suffix" data-suffix="%"><input type="number" step="any" min="0" max="100" placeholder="—" @bind="_form.TrailingRatePercent" /></div>
+                    <small>Sous le plus haut depuis l'entrée</small>
+                </label>
+                <div class="field">
+                    <span>Stop suiveur en ATR</span>
+                    <label class="check"><input type="checkbox" @bind="_form.UseTrailingAtr" /> Activer</label>
+                </div>
+                @if (_form.UseTrailingAtr)
+                {
+                    <label class="field">
+                        <span>Distance</span>
+                        <div class="suffix" data-suffix="× ATR"><input type="number" step="any" min="0" @bind="_form.TrailingAtrMultiple" style="padding-right:52px" /></div>
+                    </label>
+                    <label class="field">
+                        <span>Période de l'ATR</span>
+                        <input type="number" step="1" min="1" @bind="_form.TrailingAtrPeriod" />
+                    </label>
+                }
+            </div>
+        </div>
+    </div>
+
+    <aside class="editor-side">
+        <div class="card">
+            <h2>Validation</h2>
+            @if (check.Error is not null)
+            {
+                <div class="notice error">@check.Error</div>
+            }
+            else
+            {
+                <div class="notice ok">Stratégie valide.</div>
+            }
+            @if (check.Problems.Count > 0)
+            {
+                <div class="notice warn" style="margin-top:8px">
+                    <ul>
+                        @foreach (var problem in check.Problems)
+                        {
+                            <li>@problem</li>
+                        }
+                    </ul>
+                </div>
+            }
+            @if (check.Definition is { } valid)
+            {
+                <p class="muted" style="margin:10px 0 0">Empreinte <span class="mono">@valid.Fingerprint[..12]</span></p>
+                <details style="margin-top:10px">
+                    <summary>JSON</summary>
+                    <pre class="code-block" style="margin-top:8px">@check.Json</pre>
+                </details>
+            }
+        </div>
+
+        <div class="card">
+            <h2>Backtest</h2>
+            <div class="fields" style="grid-template-columns: 1fr 1fr">
+                <label class="field">
+                    <span>Du</span>
+                    <input type="date" @bind="_from" />
+                </label>
+                <label class="field">
+                    <span>Au</span>
+                    <input type="date" @bind="_to" />
+                </label>
+                <label class="field" style="grid-column: span 2">
+                    <span>Capital de départ</span>
+                    <div class="suffix" data-suffix="€"><input type="number" step="1000" min="0" @bind="_cash" /></div>
+                </label>
+            </div>
+            <div class="stack" style="margin-top:12px">
+                <label class="check"><input type="checkbox" @bind="_saveRun" /> Enregistrer le résultat</label>
+                <button class="btn primary" disabled="@(check.Definition is null || _running)" @onclick="() => Run(check)">
+                    @if (_running)
+                    {
+                        <span class="spinner"></span> <span>Calcul en cours…</span>
+                    }
+                    else
+                    {
+                        <span>Lancer le backtest</span>
+                    }
+                </button>
+                <small class="muted">@_dataSummary</small>
+            </div>
+        </div>
+    </aside>
+</div>
+
+@if (_runError is not null)
+{
+    <div class="notice error" style="margin-bottom:16px">@_runError</div>
+}
+
+@if (_result is not null)
+{
+    <div class="page-header" style="margin-top:8px">
+        <div>
+            <h1>Résultat</h1>
+            <p class="muted">
+                @_result.StrategyName, calculé en @_elapsed.TotalSeconds.ToString("N1", CultureInfo.CurrentCulture) s.
+                @if (_runId is { } id)
+                {
+                    <span>Enregistré sous le <a href="runs/@id">run n° @id</a>.</span>
+                }
+            </p>
+        </div>
+    </div>
+    <ResultView Result="_result" />
+}
+
+@code {
+    private StrategyForm? _form;
+    private string? _savedJson;
+    private string? _loadError;
+    private string? _rawJson;
+    private string? _saveMessage;
+    private bool _saveFailed;
+    private bool _saving;
+    private bool _confirmDelete;
+
+    private DateOnly? _from;
+    private DateOnly? _to;
+    private decimal _cash = 100_000m;
+    private bool _saveRun;
+    private bool _running;
+    private string _dataSummary = string.Empty;
+    private BacktestResult? _result;
+    private int? _runId;
+    private string? _runError;
+    private TimeSpan _elapsed;
+
+    [Parameter]
+    public string? Key { get; set; }
+
+    /// <summary>Clé d'une stratégie à dupliquer.</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? From { get; set; }
+
+    /// <summary>Run dont on reprend la stratégie.</summary>
+    [SupplyParameterFromQuery(Name = "run")]
+    public int? RunId { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _form = null;
+        _loadError = null;
+        _rawJson = null;
+        _saveMessage = null;
+        _confirmDelete = false;
+        _result = null;
+        _runError = null;
+
+        try
+        {
+            _form = await LoadAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or JsonException)
+        {
+            _loadError = $"Cette stratégie ne se relit pas : {exception.Message}";
+        }
+
+        _savedJson = Key is null ? null : _form?.ToDefinition().ToJson();
+
+        var instruments = await MarketData.ListInstrumentsAsync();
+        var withBars = instruments.Where(static i => i.FirstBar is not null).ToList();
+
+        _dataSummary = withBars.Count == 0
+            ? "Aucune cotation en base : passez par la page Données."
+            : $"{withBars.Count} titres en base, du {Labels.Date(withBars.Min(static i => i.FirstBar!.Value))} au {Labels.Date(withBars.Max(static i => i.LastBar!.Value))}. Dates vides : tout l'historique.";
+    }
+
+    private async Task<StrategyForm?> LoadAsync()
+    {
+        if (Key is not null)
+        {
+            _rawJson = await Library.ReadAsync(Key);
+
+            if (_rawJson is null)
+            {
+                _loadError = $"Aucune stratégie « {Key} ».";
+                return null;
+            }
+
+            return StrategyForm.From(StrategyDefinition.FromJson(_rawJson));
+        }
+
+        if (From is not null && await Library.ReadAsync(From) is { } json)
+        {
+            var copy = StrategyForm.From(StrategyDefinition.FromJson(json));
+            copy.Name += " (copie)";
+            return copy;
+        }
+
+        if (RunId is { } runId && await Runs.GetStrategyAsync(runId) is { } strategy)
+        {
+            return StrategyForm.From(strategy);
+        }
+
+        return new StrategyForm();
+    }
+
+    private Validation Check()
+    {
+        var problems = _form!.Problems(Catalog);
+
+        try
+        {
+            var definition = _form.ToDefinition();
+            definition.Validate();
+            return new Validation(definition, definition.ToJson(), null, problems);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            return new Validation(null, null, exception.Message, problems);
+        }
+    }
+
+    private bool IsDirty(Validation check) => check.Json is null || check.Json != _savedJson;
+
+    private void ChangeSizing(ChangeEventArgs e)
+    {
+        var mode = Enum.Parse<SizingMode>(e.Value?.ToString() ?? nameof(SizingMode.EquityFraction));
+
+        if (mode != _form!.SizingMode)
+        {
+            // Une fraction et un montant ne se convertissent pas l'un en l'autre.
+            _form.SizingMode = mode;
+            _form.SizingValue = mode == SizingMode.EquityFraction ? PositionSizing.DefaultValue : 10_000m;
+        }
+    }
+
+    private async Task Save(Validation check)
+    {
+        if (check.Definition is not { } definition)
+        {
+            return;
+        }
+
+        _saving = true;
+        _saveMessage = null;
+
+        try
+        {
+            var key = Key ?? JsonFileStrategyRepository.KeyFor(definition.Name);
+
+            if (Key is null && (await Library.ListAsync()).Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Une stratégie est déjà enregistrée sous « {key}.json » : changez le nom.");
+            }
+
+            await Library.SaveAsync(key, definition);
+            _savedJson = check.Json;
+
+            if (Key is null)
+            {
+                Navigation.NavigateTo($"strategies/{key}", replace: true);
+                return;
+            }
+
+            _saveMessage = "Stratégie enregistrée.";
+            _saveFailed = false;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _saveMessage = exception.Message;
+            _saveFailed = true;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Delete()
+    {
+        await Library.DeleteAsync(Key!);
+        Navigation.NavigateTo("strategies");
+    }
+
+    private async Task Run(Validation check)
+    {
+        if (check.Definition is not { } definition)
+        {
+            return;
+        }
+
+        _running = true;
+        _runError = null;
+        _result = null;
+        _runId = null;
+
+        var started = TimeProvider.System.GetTimestamp();
+
+        try
+        {
+            var request = new RunBacktestRequest
+            {
+                Strategy = definition,
+                From = _from,
+                To = _to,
+                InitialCash = _cash,
+                Save = _saveRun,
+            };
+
+            // Le moteur calcule de façon synchrone : hors du circuit, la page reste réactive.
+            var response = await Task.Run(() => Backtests.HandleAsync(request));
+
+            _result = response.Result;
+            _runId = response.RunId;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _runError = exception.Message;
+        }
+        finally
+        {
+            _elapsed = TimeProvider.System.GetElapsedTime(started);
+            _running = false;
+        }
+    }
+
+    private sealed record Validation(StrategyDefinition? Definition, string? Json, string? Error, IReadOnlyList<string> Problems);
+}

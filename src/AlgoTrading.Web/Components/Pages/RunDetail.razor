@@ -1,0 +1,82 @@
+@page "/runs/{Id:int}"
+@inject ReplayBacktestRunHandler Replays
+
+<PageTitle>Run @Id · AlgoTrading</PageTitle>
+
+@if (_error is not null)
+{
+    <h1>Run @Id</h1>
+    <div class="notice error">@_error</div>
+}
+else if (_replay is null)
+{
+    <h1>Run @Id</h1>
+    <p class="muted"><span class="spinner"></span> Le run est rejoué depuis sa stratégie…</p>
+}
+else
+{
+    var summary = _replay.Summary;
+    var result = _replay.Replay.Result;
+
+    <div class="page-header">
+        <div>
+            <h1>@summary.StrategyName</h1>
+            <p class="muted">
+                Run n° @summary.Id du @summary.RanAt.ToLocalTime().ToString("dd/MM/yyyy à HH:mm", CultureInfo.CurrentCulture)
+                · empreinte <span class="mono">@summary.Fingerprint[..12]</span>
+            </p>
+        </div>
+        <div class="row">
+            <a class="btn" href="strategies/new?run=@summary.Id">Repartir de cette stratégie</a>
+        </div>
+    </div>
+
+    @if (Drifted(summary, result))
+    {
+        <div class="notice warn" style="margin-bottom:16px">
+            Le rejeu ne retrouve pas exactement le résultat enregistré
+            (@Labels.SignedPercent(summary.TotalReturn) enregistré, @Labels.SignedPercent(result.Metrics.TotalReturn) rejoué) :
+            les données de marché ont changé depuis, ou le moteur a évolué.
+        </div>
+    }
+
+    <ResultView Result="result" />
+
+    @if (result.StrategyJson is { } json)
+    {
+        <div class="card">
+            <details>
+                <summary>Stratégie au format JSON</summary>
+                <pre class="code-block" style="margin-top:10px">@json</pre>
+            </details>
+        </div>
+    }
+}
+
+@code {
+    private ReplayBacktestRunResponse? _replay;
+    private string? _error;
+
+    [Parameter]
+    public int Id { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _replay = null;
+        _error = null;
+
+        try
+        {
+            // Le moteur calcule de façon synchrone : hors du circuit, la page reste réactive.
+            _replay = await Task.Run(() => Replays.HandleAsync(Id));
+            _error = _replay is null ? "Ce run est introuvable, ou n'a pas conservé sa stratégie." : null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            _error = $"Le run ne peut pas être rejoué : {exception.Message}";
+        }
+    }
+
+    private static bool Drifted(BacktestRunSummary summary, BacktestResult result) =>
+        Math.Abs(summary.TotalReturn - result.Metrics.TotalReturn) > 0.0001m;
+}
