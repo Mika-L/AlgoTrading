@@ -23,27 +23,31 @@
 
     <div class="fields">
         <label class="field">
-            <span>Type de règle</span>
-            <select value="@Rule.Type" @onchange="ChangeType">
-                @foreach (var (type, label, _) in Labels.RuleTypes)
+            <span>Indicateur</span>
+            <select value="@Rule.Indicator" @onchange="ChangeIndicator">
+                @if (indicator is null)
                 {
-                    <option value="@type">@label</option>
+                    <option value="@Rule.Indicator">@Rule.Indicator (inconnu)</option>
+                }
+                @foreach (var candidate in Catalog.Indicators)
+                {
+                    <option value="@candidate.Kind">@candidate.Kind</option>
                 }
             </select>
         </label>
 
         <label class="field">
-            <span>Indicateur</span>
+            <span>Type de règle</span>
             @* Recréée quand ses options changent : un select dont seules les options changent
-               garde sa sélection précédente, sans égard pour la valeur liée. *@
-            <select @key="Rule.Type" value="@Rule.Indicator" @onchange="ChangeIndicator">
-                @if (indicator is null)
+               garde sa sélection précédente, sans égard pour la valeur liée. Le type courant
+               reste listé même incompatible, pour qu'un fichier mal formé s'affiche tel quel. *@
+            <select @key="Rule.Indicator" value="@Rule.Type" @onchange="ChangeType">
+                @foreach (var (type, label, _) in Labels.RuleTypes)
                 {
-                    <option value="@Rule.Indicator">@Rule.Indicator (inconnu)</option>
-                }
-                @foreach (var candidate in Catalog.CompatibleWith(Rule.Type))
-                {
-                    <option value="@candidate.Kind">@candidate.Kind</option>
+                    if (type == Rule.Type || indicator is null || Catalog.Supports(type, indicator))
+                    {
+                        <option value="@type">@label</option>
+                    }
                 }
             </select>
         </label>

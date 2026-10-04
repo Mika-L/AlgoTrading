@@ -42,8 +42,6 @@ public sealed class IndicatorLineCatalog
         _ => true,
     };
 
-    public IEnumerable<IndicatorInfo> CompatibleWith(string ruleType) => Indicators.Where(i => Supports(ruleType, i));
-
     public static IndicatorLineCatalog Discover()
     {
         var series = SyntheticSeries(300);

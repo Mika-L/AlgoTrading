@@ -27,7 +27,7 @@ public class IndicatorLineCatalogTests
     [Fact]
     public void should_offer_band_breakouts_only_on_indicators_with_bands()
     {
-        Catalog.CompatibleWith(BandBreakoutRule.Type).Select(static i => i.Kind).ShouldBe(["Bollinger", "Keltner"], ignoreOrder: true);
+        Catalog.Indicators.Where(static i => Catalog.Supports(BandBreakoutRule.Type, i)).Select(static i => i.Kind).ShouldBe(["Bollinger", "Keltner"], ignoreOrder: true);
     }
 
     [Fact]

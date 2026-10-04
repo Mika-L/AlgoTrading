@@ -95,14 +95,42 @@ public class StrategyFormTests
     }
 
     [Fact]
-    public void should_pick_a_compatible_indicator_when_the_rule_type_demands_one()
+    public void should_adopt_the_default_rule_of_the_new_indicator()
+    {
+        var rule = RuleForm.For(Catalog.Find("Rsi")!);
+        rule.Weight = 2m;
+        rule.AsEvent = true;
+
+        rule.ChangeIndicator(Catalog.Find("Bollinger")!);
+
+        rule.Type.ShouldBe(BandBreakoutRule.Type);
+        rule.Weight.ShouldBe(2m);
+        rule.AsEvent.ShouldBeTrue();
+        rule.Problems(Catalog).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void should_take_the_thresholds_of_the_new_indicator_rather_than_keep_the_old_ones()
     {
         var rule = RuleForm.For(Catalog.Find("Rsi")!);
 
-        rule.ChangeType(BandBreakoutRule.Type, Catalog);
+        rule.ChangeIndicator(Catalog.Find("Cci")!);
 
-        Catalog.Find(rule.Indicator)!.HasLines(IndicatorLines.Upper, IndicatorLines.Lower).ShouldBeTrue();
-        RuleRegistry.Create(rule.ToConfig()).ShouldBeOfType<BandBreakoutRule>();
+        rule.Type.ShouldBe(ThresholdRule.Type);
+        rule.BullishBelow.ShouldBe(-100m);
+        rule.BearishAbove.ShouldBe(100m);
+    }
+
+    [Fact]
+    public void should_never_replace_the_indicator_when_the_type_changes()
+    {
+        var rule = RuleForm.For(Catalog.Find("Rsi")!);
+
+        rule.ChangeType(SignRule.Type, Catalog);
+        rule.ChangeType(ThresholdRule.Type, Catalog);
+
+        rule.Indicator.ShouldBe("Rsi");
+        rule.Problems(Catalog).ShouldBeEmpty();
     }
 
     [Fact]

@@ -259,15 +259,27 @@ public sealed class RuleForm
         };
     }
 
-    /// <summary>Change d'indicateur : ses paramètres par défaut, et des lignes qu'il produit vraiment.</summary>
+    /// <summary>
+    /// Change d'indicateur : la règle repart de celle qu'il porte par défaut, seuils et lignes
+    /// compris — des seuils de RSI n'ont pas de sens sur un CCI. Poids et déclenchement restent.
+    /// </summary>
     public void ChangeIndicator(IndicatorInfo indicator)
     {
-        ArgumentNullException.ThrowIfNull(indicator);
+        var defaults = For(indicator);
 
-        Indicator = indicator.Kind;
-        Parameters = indicator.Defaults.ToDictionary(static p => p.Name, static p => p.Value, StringComparer.Ordinal);
+        Type = defaults.Type;
+        Indicator = defaults.Indicator;
+        Parameters = defaults.Parameters;
+        BullishBelow = defaults.BullishBelow;
+        BearishAbove = defaults.BearishAbove;
+        CrossoverMode = defaults.CrossoverMode;
+        MeanReverting = defaults.MeanReverting;
+        BullishWhenAbove = defaults.BullishWhenAbove;
+        Pivot = defaults.Pivot;
 
-        Line = FastLine = SlowLine = string.Empty;
+        Line = defaults.Line;
+        FastLine = defaults.FastLine;
+        SlowLine = defaults.SlowLine;
         FitLines(indicator);
     }
 
@@ -300,18 +312,17 @@ public sealed class RuleForm
     private static string? First(IReadOnlyList<string> lines, params string[] preferred) =>
         preferred.FirstOrDefault(lines.Contains);
 
-    /// <summary>Change de type ; l'indicateur est conservé s'il convient, remplacé sinon.</summary>
+    /// <summary>
+    /// Change de type sans toucher à l'indicateur : l'éditeur ne propose que les types qu'il
+    /// sait alimenter. Seules ses lignes s'ajustent.
+    /// </summary>
     public void ChangeType(string type, IndicatorLineCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
 
         Type = type;
 
-        if (catalog.Find(Indicator) is not { } current || !catalog.Supports(type, current))
-        {
-            ChangeIndicator(catalog.CompatibleWith(type).First());
-        }
-        else
+        if (catalog.Find(Indicator) is { } current)
         {
             FitLines(current);
         }
