@@ -63,6 +63,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<RunBacktestHandler>();
         services.AddScoped<ReplayBacktestRunHandler>();
         services.AddScoped<OptimizeStrategyHandler>();
+        services.AddScoped<RunWalkForwardHandler>();
+        services.AddScoped<ScreenRulesHandler>();
         services.AddScoped(sp => new GenerateReportHandler([.. sp.GetServices<IReportSink>()]));
 
         return services;

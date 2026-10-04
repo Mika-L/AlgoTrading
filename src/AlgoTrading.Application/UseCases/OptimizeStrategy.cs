@@ -25,35 +25,32 @@ public sealed record OptimizeStrategyRequest
 
     public bool Parallel { get; init; } = true;
 
+    public int MinimumTrades { get; init; }
+
+    public long? SampleSize { get; init; }
+
+    public ulong Seed { get; init; } = 1;
+
+    public bool OneVariantPerIndicator { get; init; } = true;
+
     /// <summary>Persiste les résultats retenus.</summary>
     public bool Save { get; init; }
 }
 
-public sealed record OptimizeStrategyResponse(IReadOnlyList<OptimizationOutcome> Outcomes, IReadOnlyList<int> SavedRunIds);
+public sealed record OptimizeStrategyResponse(OptimizationReport Report, IReadOnlyList<int> SavedRunIds);
 
 public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IBacktestRunStore store)
 {
-    public async Task<OptimizeStrategyResponse> HandleAsync(OptimizeStrategyRequest request, CancellationToken cancellationToken = default)
+    public async Task<OptimizeStrategyResponse> HandleAsync(
+        OptimizeStrategyRequest request,
+        IProgress<OptimizationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var symbols = request.Universe;
+        var tradable = await repository.LoadTradableAsync(request.Universe, request.From, request.To, cancellationToken).ConfigureAwait(false);
 
-        if (symbols.Count == 0)
-        {
-            var known = await repository.ListInstrumentsAsync(cancellationToken).ConfigureAwait(false);
-            symbols = [.. known.Select(static i => i.Symbol)];
-        }
-
-        var universe = await repository.LoadUniverseAsync(symbols, request.From, request.To, cancellationToken).ConfigureAwait(false);
-        var tradable = universe.Where(static s => !s.IsEmpty).ToArray();
-
-        if (tradable.Length == 0)
-        {
-            throw new InvalidOperationException("Aucune cotation dans la plage demandée.");
-        }
-
-        var outcomes = new StrategyOptimizer().Run(new OptimizationRequest
+        var report = new StrategyOptimizer().Run(new OptimizationRequest
         {
             Catalog = request.Catalog,
             Universe = tradable,
@@ -64,18 +61,33 @@ public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IB
             To = request.To,
             Top = request.Top,
             Parallel = request.Parallel,
-        }, cancellationToken);
+            MinimumTrades = request.MinimumTrades,
+            SampleSize = request.SampleSize,
+            Seed = request.Seed,
+            OneVariantPerIndicator = request.OneVariantPerIndicator,
+        }, progress, cancellationToken);
 
         var saved = new List<int>();
 
         if (request.Save)
         {
-            foreach (var outcome in outcomes)
+            // Le classement ne garde que les mesures : les retenues sont rejouées pour être
+            // persistées avec leur courbe et leurs trades.
+            foreach (var candidate in report.Top)
             {
-                saved.Add(await store.SaveAsync(outcome.Result, cancellationToken).ConfigureAwait(false));
+                var result = new BacktestEngine().Run(new BacktestRequest
+                {
+                    Strategy = candidate.Strategy,
+                    Universe = tradable,
+                    InitialCash = request.InitialCash,
+                    From = request.From,
+                    To = request.To,
+                });
+
+                saved.Add(await store.SaveAsync(result, cancellationToken).ConfigureAwait(false));
             }
         }
 
-        return new OptimizeStrategyResponse(outcomes, saved);
+        return new OptimizeStrategyResponse(report, saved);
     }
 }

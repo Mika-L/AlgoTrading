@@ -1,0 +1,105 @@
+@{
+    var strategy = Report.OutOfSample;
+    var market = Report.Benchmark;
+    var gap = strategy.TotalReturn - market.TotalReturn;
+}
+
+<div class="tiles">
+    <Tile Label="Stratégie hors échantillon" Value="@Labels.SignedPercent(strategy.TotalReturn)" Tone="@Tone(strategy.TotalReturn)"
+          Note="@($"{Labels.SignedPercent(strategy.AnnualisedReturn)} par an")" />
+    <Tile Label="Acheter et conserver" Value="@Labels.SignedPercent(market.TotalReturn)" Tone="@Tone(market.TotalReturn)"
+          Note="@($"{Labels.SignedPercent(market.AnnualisedReturn)} par an, sans frais")" />
+    <Tile Label="Écart au marché" Value="@Labels.SignedPercent(gap)" Tone="@Tone(gap)" Note="Rendement cumulé" />
+    <Tile Label="Pire baisse" Value="@Labels.Percent(-strategy.MaxDrawdown)" Note="@($"Marché : {Labels.Percent(-market.MaxDrawdown)}")" />
+    <Tile Label="Fenêtres au-dessus du marché" Value="@Labels.Percent(Report.OutperformingWindowShare, 0)"
+          Note="@($"Gagnantes : {Labels.Percent(Report.ProfitableWindowShare, 0)}")" />
+    <Tile Label="Efficacité" Value="@(Report.Efficiency is { } efficiency ? Labels.Number(efficiency) : "—")"
+          Note="Annualisé en test ÷ en apprentissage" />
+    <Tile Label="Combinaisons essayées" Value="@Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture)" Note="Toutes fenêtres confondues" />
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Fenêtres de test mises bout à bout</h2>
+        <span class="muted">Chaque fenêtre repart de l'actif où la précédente s'est arrêtée.</span>
+    </div>
+    <LineChart Series="_series" Baseline="@((double)InitialCash)" FormatValue="@(v => Labels.Money((decimal)v))"
+               AriaLabel="Actif hors échantillon de la stratégie et de l'achat-conservation" />
+</div>
+
+<div class="card" style="padding:0">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Apprentissage</th>
+                    <th>Test</th>
+                    <th>Combinaison retenue</th>
+                    <th class="num">Calmar appr.</th>
+                    <th class="num">Rendement test</th>
+                    <th class="num">Marché</th>
+                    <th class="num">Calmar test</th>
+                    <th class="num">Trades test</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var window in Report.Windows)
+                {
+                    <tr>
+                        <td class="secondary">@Labels.Date(window.TrainFrom) → @Labels.Date(window.TrainTo)</td>
+                        <td>@Labels.Date(window.TestFrom) → @Labels.Date(window.TestTo)</td>
+                        @if (window.Selected is { } selected && window.Test is { } test)
+                        {
+                            <td class="mono">@selected.Strategy.Name</td>
+                            <td class="num">@Labels.Number(selected.Score)</td>
+                            <td class="num @Tone(test.Metrics.TotalReturn)">@Labels.SignedPercent(test.Metrics.TotalReturn)</td>
+                            <td class="num @Tone(window.BenchmarkReturn)">@Labels.SignedPercent(window.BenchmarkReturn)</td>
+                            <td class="num">@Labels.Number(test.Metrics.Calmar)</td>
+                            <td class="num">@test.Metrics.TradeCount.ToString("N0", CultureInfo.CurrentCulture)</td>
+                            <td><button class="btn small ghost" @onclick="() => OnRetain.InvokeAsync(selected.Strategy)">Retenir</button></td>
+                        }
+                        else
+                        {
+                            <td class="muted">Aucune combinaison assez active : en liquidités</td>
+                            <td class="num">—</td>
+                            <td class="num">—</td>
+                            <td class="num @Tone(window.BenchmarkReturn)">@Labels.SignedPercent(window.BenchmarkReturn)</td>
+                            <td class="num">—</td>
+                            <td class="num">—</td>
+                            <td></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<p class="muted">
+    Univers figé : la composition d'aujourd'hui appliquée au passé embellit tous les résultats (biais du survivant).
+    Les positions encore ouvertes en fin de fenêtre de test sont comptées à leur clôture, sans frais de sortie.
+</p>
+
+@code {
+    private IReadOnlyList<ChartSeries> _series = [];
+
+    [Parameter, EditorRequired]
+    public WalkForwardReport Report { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public decimal InitialCash { get; set; }
+
+    /// <summary>Enregistre la combinaison retenue d'une fenêtre.</summary>
+    [Parameter]
+    public EventCallback<StrategyDefinition> OnRetain { get; set; }
+
+    protected override void OnParametersSet() =>
+        _series =
+        [
+            new ChartSeries("Stratégie", 0, [.. Report.OutOfSampleCurve.Select(static p => new ChartPoint(p.Date, (double)p.Equity))]),
+            new ChartSeries("Acheter et conserver", 1, [.. Report.BenchmarkCurve.Select(static p => new ChartPoint(p.Date, (double)p.Equity))]),
+        ];
+
+    private static string? Tone(decimal value) => value > 0m ? "good" : value < 0m ? "bad" : null;
+}

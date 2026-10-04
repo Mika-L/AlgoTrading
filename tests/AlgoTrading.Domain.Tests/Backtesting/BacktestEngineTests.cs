@@ -57,6 +57,30 @@ public class BacktestEngineTests
     }
 
     [Fact]
+    public void should_trade_from_the_first_session_of_the_range_when_the_history_starts_earlier()
+    {
+        // Les curseurs partaient de la première barre de la série : quand la plage commençait
+        // plus tard, ils attendaient une date que le calendrier ne visitait jamais, et plus
+        // rien ne se passait. Le walk-forward, qui joue des fenêtres sur tout l'historique,
+        // ne produisait ainsi aucun trade hors de sa première fenêtre.
+        var bars = TestBars.Synthetic(300);
+        var from = bars.Dates[150];
+
+        var result = new BacktestEngine().Run(new BacktestRequest
+        {
+            Strategy = RisesAndFalls(0.5m),
+            Universe = [bars],
+            InitialCash = 10_000m,
+            From = from,
+            Costs = ZeroCostModel.Instance,
+        });
+
+        result.Executions.ShouldNotBeEmpty();
+        result.Executions.ShouldAllBe(e => e.Date >= from);
+        result.EquityCurve.Count.ShouldBe(150);
+    }
+
+    [Fact]
     public void should_give_the_same_equity_curve_whatever_the_order_the_universe_is_declared_in()
     {
         // Le biais d'ordre d'itération : le résultat dépendait de l'ordre d'énumération

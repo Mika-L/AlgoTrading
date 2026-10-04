@@ -1,0 +1,79 @@
+[
+  {
+    "type": "Threshold",
+    "indicator": "Rsi",
+    "parameters": { "period": { "from": 7, "to": 28, "step": 7 } },
+    "bullishBelow": [20, 25, 30, 35],
+    "bearishAbove": [65, 70, 75, 80]
+  },
+  {
+    "type": "Threshold",
+    "indicator": "Cci",
+    "parameters": { "period": [14, 20, 30] },
+    "bullishBelow": [-150, -100],
+    "bearishAbove": [100, 150]
+  },
+  {
+    "type": "Threshold",
+    "indicator": "Stochastic",
+    "parameters": { "period": [9, 14, 21], "signal": 3 },
+    "bullishBelow": [15, 20, 25],
+    "bearishAbove": [75, 80, 85]
+  },
+  {
+    "type": "Threshold",
+    "indicator": "WilliamsR",
+    "parameters": { "period": [10, 14, 21] },
+    "bullishBelow": [-85, -80],
+    "bearishAbove": [-20, -15]
+  },
+  {
+    "type": "Crossover",
+    "indicator": "Ema",
+    "parameters": { "fast": [5, 9, 12], "slow": [20, 30, 50] },
+    "mode": "Cross"
+  },
+  {
+    "type": "Crossover",
+    "indicator": "Macd",
+    "parameters": { "fast": [8, 12], "slow": [21, 26], "signal": 9 },
+    "fastLine": "value",
+    "slowLine": "signal",
+    "mode": "Relative"
+  },
+  {
+    "type": "Sign",
+    "indicator": "Momentum",
+    "parameters": { "period": { "from": 5, "to": 20, "step": 5 } },
+    "pivot": 0
+  },
+  {
+    "type": "BandBreakout",
+    "indicator": "Bollinger",
+    "parameters": { "period": [15, 20, 25], "multiplier": [1.5, 2, 2.5] },
+    "meanReverting": true
+  },
+  {
+    "type": "BandBreakout",
+    "indicator": "Keltner",
+    "parameters": { "period": [15, 20], "multiplier": [1.5, 2] },
+    "meanReverting": true
+  },
+  {
+    "type": "PriceVsLevel",
+    "indicator": "Sar",
+    "parameters": { "step": [0.01, 0.02, 0.03], "maxStep": 0.2 },
+    "bullishWhenAbove": true
+  },
+  {
+    "type": "PriceVsLevel",
+    "indicator": "Vwap",
+    "parameters": { "period": [10, 20, 40] },
+    "bullishWhenAbove": false
+  },
+  {
+    "type": "IchimokuCloud",
+    "indicator": "Ichimoku",
+    "parameters": { "tenkan": 9, "kijun": 26, "senkouB": 52, "displacement": 26 }
+  }
+]

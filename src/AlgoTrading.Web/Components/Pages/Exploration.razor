@@ -1,0 +1,358 @@
+@page "/exploration"
+@implements IDisposable
+@using System.Numerics
+@using AlgoTrading.Infrastructure.Strategies
+@inject RuleCatalogLibrary Catalogs
+@inject ScreenRulesHandler Screener
+@inject RunWalkForwardHandler WalkForwarder
+@inject IStrategyRepository Library
+@inject NavigationManager Navigation
+
+<PageTitle>Exploration · AlgoTrading</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Exploration</h1>
+        <p class="muted">
+            Cribler les variantes d'un catalogue de règles, puis juger leurs combinaisons hors échantillon.
+            Le calcul tourne tant que cet onglet reste ouvert.
+        </p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="tabs" role="tablist">
+        <button class="tab @(_mode == Mode.Screening ? "active" : null)" role="tab" disabled="@Running" @onclick="() => _mode = Mode.Screening">Criblage</button>
+        <button class="tab @(_mode == Mode.WalkForward ? "active" : null)" role="tab" disabled="@Running" @onclick="() => _mode = Mode.WalkForward">Walk-forward</button>
+    </div>
+
+    <p class="muted">
+        @if (_mode == Mode.Screening)
+        {
+            <text>Chaque variante est jouée seule, puis jugée avec ses voisines de grille : on y cherche des plateaux, pas des pics.</text>
+        }
+        else
+        {
+            <text>On optimise sur une fenêtre, on joue le gagnant sur la période suivante, on décale et on recommence. Seules les fenêtres de test comptent.</text>
+        }
+    </p>
+
+    <div class="fields explore-fields">
+        <label class="field">
+            <span>Catalogue</span>
+            <select @bind="_catalogName" @bind:after="LoadCatalog" disabled="@Running">
+                <option value="@RuleCatalogLibrary.Default">Par défaut — 12 indicateurs</option>
+                @foreach (var name in _catalogNames)
+                {
+                    <option value="@name">@name</option>
+                }
+            </select>
+        </label>
+        <label class="field">
+            <span>Depuis</span>
+            <input type="date" @bind="_from" disabled="@Running" />
+        </label>
+        <label class="field">
+            <span>Jusqu'au</span>
+            <input type="date" @bind="_to" disabled="@Running" />
+            <small>Arrêtez-vous avant la période réservée au verdict final.</small>
+        </label>
+        <label class="field">
+            <span>Trades minimum</span>
+            <input type="number" min="0" @bind="_minimumTrades" disabled="@Running" />
+        </label>
+
+        @if (_mode == Mode.WalkForward)
+        {
+            <label class="field">
+                <span>Apprentissage (mois)</span>
+                <input type="number" min="1" @bind="_trainingMonths" disabled="@Running" />
+            </label>
+            <label class="field">
+                <span>Test (mois)</span>
+                <input type="number" min="1" @bind="_testMonths" disabled="@Running" />
+            </label>
+            <label class="field">
+                <span>Règles par combinaison</span>
+                <div class="row">
+                    <input type="number" min="1" @bind="_minimumRules" @bind:after="Recount" disabled="@Running" aria-label="Minimum" />
+                    <span class="muted">à</span>
+                    <input type="number" min="1" @bind="_maximumRules" @bind:after="Recount" disabled="@Running" aria-label="Maximum" />
+                </div>
+            </label>
+            <label class="field">
+                <span>Tirages par fenêtre</span>
+                <input type="number" min="1" placeholder="toutes" @bind="_sample" disabled="@Running" />
+            </label>
+            <label class="field">
+                <span>Graine</span>
+                <input type="number" min="0" @bind="_seed" disabled="@Running" />
+            </label>
+        }
+    </div>
+
+    @if (_catalogError is not null)
+    {
+        <div class="notice error">@_catalogError</div>
+    }
+    else if (_catalog is not null)
+    {
+        <p class="muted">
+            @_catalog.Rules.Count règles@(_catalog.Discarded > 0 ? $", {_catalog.Discarded} variantes invalides écartées" : null).
+            @if (_mode == Mode.WalkForward)
+            {
+                <text> @_space.ToString("N0", CultureInfo.CurrentCulture) combinaisons possibles par fenêtre</text>
+                @if (_sample is null && _space > LargeSpace)
+                {
+                    <strong class="bad"> — c'est beaucoup : tirez-en un échantillon.</strong>
+                }
+            }
+        </p>
+    }
+
+    <div class="row">
+        @if (Running)
+        {
+            <button class="btn danger" @onclick="Cancel">Annuler</button>
+        }
+        else
+        {
+            <button class="btn primary" disabled="@(_catalog is null)" @onclick="Start">Lancer</button>
+        }
+    </div>
+
+    @if (Running)
+    {
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Percent">
+            <div style="width:@(Percent)%"></div>
+        </div>
+        <p class="muted">@_progressText</p>
+    }
+
+    @if (_error is not null)
+    {
+        <div class="notice error">@_error</div>
+    }
+
+    @if (_retainError is not null)
+    {
+        <div class="notice error">@_retainError</div>
+    }
+</div>
+
+@if (_mode == Mode.Screening && _screening is not null)
+{
+    <ScreeningView Report="_screening" OnRetain="Retain" />
+}
+
+@if (_mode == Mode.WalkForward && _walkForward is not null)
+{
+    <WalkForwardView Report="_walkForward" InitialCash="InitialCash" OnRetain="Retain" />
+}
+
+@code {
+    private const decimal InitialCash = 100_000m;
+
+    /// <summary>Au-delà, une exploration exhaustive se compte en dizaines de minutes par fenêtre.</summary>
+    private const int LargeSpace = 20_000;
+
+    private enum Mode
+    {
+        Screening,
+        WalkForward,
+    }
+
+    private Mode _mode = Mode.Screening;
+    private IReadOnlyList<string> _catalogNames = [];
+    private string _catalogName = RuleCatalogLibrary.Default;
+    private RuleCatalog? _catalog;
+    private string? _catalogError;
+    private BigInteger _space;
+
+    private DateOnly? _from;
+    private DateOnly? _to;
+    private int _minimumTrades = 20;
+    private int _trainingMonths = 36;
+    private int _testMonths = 12;
+    private int _minimumRules = 2;
+    private int _maximumRules = 4;
+    private long? _sample = 3_000;
+    private ulong _seed = 1;
+
+    private CancellationTokenSource? _run;
+    private long _done;
+    private long _planned;
+    private string? _progressText;
+    private string? _error;
+    private string? _retainError;
+    private ScreeningReport? _screening;
+    private WalkForwardReport? _walkForward;
+
+    private bool Running => _run is not null;
+
+    private int Percent => _planned == 0 ? 0 : (int)(_done * 100 / _planned);
+
+    protected override void OnInitialized()
+    {
+        _catalogNames = Catalogs.List();
+
+        // Le catalogue de criblage fourni avec le projet, s'il est là : c'est le point de départ de l'entonnoir.
+        if (_catalogNames.Contains("screening"))
+        {
+            _catalogName = "screening";
+        }
+
+        LoadCatalog();
+    }
+
+    private void LoadCatalog()
+    {
+        try
+        {
+            _catalog = Catalogs.Read(_catalogName);
+            _catalogError = null;
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or System.Text.Json.JsonException)
+        {
+            _catalog = null;
+            _catalogError = $"Catalogue illisible : {exception.Message}";
+        }
+
+        Recount();
+    }
+
+    private void Recount() =>
+        _space = _catalog is null || _minimumRules < 1
+            ? BigInteger.Zero
+            : StrategyOptimizer.CountCombinations(_catalog.Rules, _minimumRules, _maximumRules);
+
+    private async Task Start()
+    {
+        if (_catalog is null)
+        {
+            return;
+        }
+
+        _run = new CancellationTokenSource();
+        _error = null;
+        _retainError = null;
+        _done = 0;
+        _planned = 0;
+        _progressText = "Chargement des cotations…";
+
+        var token = _run.Token;
+        var refresh = TimeSpan.FromMilliseconds(250);
+
+        try
+        {
+            if (_mode == Mode.Screening)
+            {
+                _screening = null;
+
+                var progress = new ThrottledProgress<OptimizationProgress>(
+                    value =>
+                    {
+                        (_done, _planned) = (value.Evaluated, value.Planned);
+                        _progressText = $"{value.Evaluated:N0} / {value.Planned:N0} variantes";
+                    },
+                    () => InvokeAsync(StateHasChanged),
+                    refresh);
+
+                _screening = await Screener.HandleAsync(
+                    new ScreenRulesRequest
+                    {
+                        Catalog = _catalog.Rules,
+                        From = _from,
+                        To = _to,
+                        MinimumTrades = _minimumTrades,
+                        InitialCash = InitialCash,
+                    },
+                    progress,
+                    token);
+            }
+            else
+            {
+                _walkForward = null;
+
+                var progress = new ThrottledProgress<WalkForwardProgress>(
+                    value =>
+                    {
+                        // Avancement global : les fenêtres passées, plus la part faite de la fenêtre en cours.
+                        var current = value.Optimization;
+                        var share = current.Planned == 0 ? 0 : (double)current.Evaluated / current.Planned;
+                        (_done, _planned) = ((long)(((value.Window - 1) + share) * 1_000), value.WindowCount * 1_000L);
+                        _progressText = $"Fenêtre {value.Window}/{value.WindowCount} — {current.Evaluated:N0} / {current.Planned:N0} combinaisons";
+                    },
+                    () => InvokeAsync(StateHasChanged),
+                    refresh);
+
+                _walkForward = await WalkForwarder.HandleAsync(
+                    new RunWalkForwardRequest
+                    {
+                        Catalog = _catalog.Rules,
+                        From = _from,
+                        To = _to,
+                        TrainingMonths = _trainingMonths,
+                        TestMonths = _testMonths,
+                        MinimumRules = _minimumRules,
+                        MaximumRules = _maximumRules,
+                        MinimumTrades = _minimumTrades,
+                        SampleSize = _sample,
+                        Seed = _seed,
+                        InitialCash = InitialCash,
+                    },
+                    progress,
+                    token);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _error = "Exploration annulée.";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _run.Dispose();
+            _run = null;
+        }
+    }
+
+    private void Cancel() => _run?.Cancel();
+
+    /// <summary>
+    /// Enregistre la stratégie dans la bibliothèque, sous une clé libre, et l'ouvre dans
+    /// l'éditeur : elle s'y affine et s'y relance comme n'importe quelle autre.
+    /// </summary>
+    private async Task Retain(StrategyDefinition strategy)
+    {
+        _retainError = null;
+
+        try
+        {
+            var existing = (await Library.ListAsync()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var stem = JsonFileStrategyRepository.KeyFor(strategy.Name);
+            var key = stem;
+
+            for (var suffix = 2; existing.Contains(key); suffix++)
+            {
+                key = $"{stem}-{suffix}";
+            }
+
+            await Library.SaveAsync(key, strategy);
+            Navigation.NavigateTo($"strategies/{key}");
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _retainError = $"Enregistrement impossible : {exception.Message}";
+        }
+    }
+
+    /// <summary>Quitter la page interrompt le calcul : il ne survit pas à l'onglet.</summary>
+    public void Dispose()
+    {
+        _run?.Cancel();
+    }
+}

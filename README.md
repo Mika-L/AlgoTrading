@@ -31,6 +31,13 @@ stratégie, la période, le capital et les titres enregistrés, et signale tout 
 résultat d'origine. Dans l'éditeur, les taux se saisissent en pour cent et redeviennent des
 fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n'a pas modifiée.
 
+La page Exploration reprend `screen` et `walk-forward` sur les catalogues de `rules/`. Le
+criblage s'y lit indicateur par indicateur, avec une carte de chaleur sur deux réglages au
+choix où les plateaux se repèrent d'un coup d'œil. Le walk-forward y trace la courbe hors
+échantillon face à l'achat-conservation. « Retenir » enregistre une variante ou une
+combinaison comme stratégie et l'ouvre dans l'éditeur. Le calcul tourne tant que l'onglet
+reste ouvert : rien n'est persisté, et quitter la page l'interrompt.
+
 ## Commandes
 
 | Commande | Rôle |
@@ -41,7 +48,9 @@ fractions à l'enregistrement, sans changer l'empreinte d'une stratégie qu'on n
 | `algo data list` | Instruments connus et étendue de leur historique. |
 | `algo data gaps` | Séances manquantes et **ruptures de cours**. |
 | `algo backtest run --strategy <fichier>` | Exécute une stratégie (`--save`, `--from`, `--to`, `--cash`). |
-| `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`). |
+| `algo backtest screen --rules <fichier>` | Joue chaque variante seule et la juge avec ses voisines de grille (`--top-per-indicator`, `--export`). |
+| `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`, `--min-trades`, `--sample`, `--seed`). |
+| `algo backtest walk-forward --rules <fichier>` | Optimise sur une fenêtre, juge le gagnant sur la suivante (`--train-months`, `--test-months`, `--to`). |
 | `algo backtest compare --runs 12,17` | Compare des résultats enregistrés. |
 | `algo report show --run <n>` | Affiche un résultat. |
 | `algo report chart --run <n>` | Rejoue un run et exporte CSV et graphique. |
@@ -50,6 +59,71 @@ Options globales : `--config <fichier>`, `--db <chemin>`, `--verbosity quiet|err
 
 La journalisation de diagnostic et la sortie utilisateur sont séparées : `--verbosity quiet`
 fait taire les traces sans masquer les résultats.
+
+## Explorer des stratégies
+
+Dans un catalogue de règles, toute valeur peut être remplacée par une liste ou une plage, et
+chaque entrée se développe en autant de variantes que le produit de ses axes :
+
+```json
+{
+  "type": "Threshold",
+  "indicator": "Rsi",
+  "parameters": { "period": { "from": 7, "to": 28, "step": 7 } },
+  "bullishBelow": [20, 25, 30, 35],
+  "bearishAbove": [65, 70, 75, 80]
+}
+```
+
+Les variantes qu'une règle refuse (un seuil de survente au-dessus du seuil de surachat) sont
+écartées et comptées. `rules/screening.json` décline ainsi les douze indicateurs en 152 règles.
+
+L'optimiseur travaille en flux : combinaisons générées à la volée, résultats réduits à leurs
+mesures, classement borné à `--top`. La mémoire ne dépend plus du nombre d'essais. Il combine
+au plus une variante par indicateur (`--allow-same-indicator` pour lever la contrainte), ne
+classe que les combinaisons d'au moins `--min-trades` trades (20 par défaut), et `--sample <n>`
+tire `n` combinaisons uniformément, sans remise et de façon reproductible (`--seed`), au lieu de
+tout parcourir. Une combinaison coûte environ 0,25 s de CPU sur le CAC 40 complet.
+
+`screen` est le premier étage de l'entonnoir. Chaque variante y est jouée seule, puis jugée
+avec ses voisines : même règle, un seul réglage décalé d'un cran dans la grille. Le classement,
+indicateur par indicateur, se fait sur le *voisinage* (le Calmar moyen de la variante et de ses
+voisines), car un plateau dit quelque chose du marché alors qu'un pic isolé ne dit rien de plus
+qu'une coïncidence. `--export` écrit les meilleures variantes de chaque indicateur en
+catalogue, prêt pour l'étage suivant.
+
+```bash
+# Criblage : les plateaux de paramètres, indicateur par indicateur
+algo backtest screen --rules rules/screening.json --to 2019-12-31 --export rules/retained.json
+# Combinaison : 20 000 tirages parmi les combinaisons de 2 à 4 règles retenues
+algo backtest optimize --rules rules/retained.json --sample 20000 --to 2019-12-31
+```
+
+Un criblage voit les séances qu'il couvre. S'il couvre aussi les fenêtres de test d'un
+walk-forward mené ensuite sur son export, ces tests ne sont plus hors échantillon. Il faut donc
+arrêter le criblage avant la première fenêtre de test, ou passer le catalogue complet au
+walk-forward.
+
+Le rapport donne le nombre de combinaisons réellement essayées. Il faudra en tenir compte pour
+corriger le meilleur score de la chance accumulée au fil des essais.
+
+Le classement d'une exploration ne vaut que sur la période explorée. `walk-forward` optimise
+sur une fenêtre (36 mois par défaut), joue le gagnant sur les 12 mois suivants, décale d'un an
+et recommence. Les fenêtres de test, mises bout à bout, donnent la seule performance qui
+compte : celle de stratégies jugées sur des séances qu'elles n'ont jamais vues. Elle est
+présentée face à l'achat-conservation de l'univers à parts égales sur les mêmes fenêtres, sans
+frais : une stratégie qui ne bat pas cette référence n'apporte rien qu'un fonds indiciel ne
+donne déjà. L'efficacité rapporte le rendement annualisé en test à celui de l'apprentissage. Une période réservée au
+verdict final se protège avec `--to` :
+
+```bash
+algo backtest walk-forward --rules rules/screening.json --sample 3000 --to 2023-12-31
+```
+
+Premier passage sur le CAC 40 (2017-2023, quatre fenêtres de test) : des Calmar
+d'apprentissage entre 1,1 et 1,7 tombent à un rendement cumulé de −0,55 % hors échantillon,
+quand l'achat-conservation fait +46,65 % pour la même pire baisse (36 %). C'est le
+surapprentissage que cette validation sert à révéler.
 
 ## Architecture
 
@@ -68,7 +142,7 @@ src/
 tests/
   AlgoTrading.Domain.Tests/       indicateurs, règles, moteur, mesures
   AlgoTrading.Architecture.Tests/ frontières entre modules
-  AlgoTrading.Web.Tests/          formulaire de stratégie, bibliothèque de fichiers
+  AlgoTrading.Web.Tests/          formulaire de stratégie, bibliothèques de fichiers, carte de chaleur
 ```
 
 Dépendances : `Domain` ← `Application` ← `Infrastructure` ← `Cli` et `Web`. Le câblage commun aux
@@ -173,8 +247,10 @@ Chaque résultat porte ses réserves, affichées avec les chiffres :
   la performance. C'est le principal défaut méthodologique restant ; le corriger demande un
   univers daté.
 - **Fenêtre unique.** Le classement de l'optimiseur se fait par Calmar et non par performance
-  brute, mais optimiser sur une seule période reste du surapprentissage. `OptimizationRequest`
-  porte déjà `From` et `To` pour qu'un walk-forward soit une boucle, pas une refonte.
+  brute, mais optimiser sur une seule période reste du surapprentissage : seul `walk-forward`
+  juge une stratégie hors échantillon.
+- **Fin de fenêtre de test.** Les positions encore ouvertes à la fin d'une fenêtre de test sont
+  comptées à leur valeur de clôture, sans frais de sortie.
 
 ## Vérification
 
