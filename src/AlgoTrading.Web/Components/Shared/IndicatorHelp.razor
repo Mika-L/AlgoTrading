@@ -1,0 +1,44 @@
+@{
+    var explanation = IndicatorGuide.Find(Indicator.Kind);
+}
+
+@if (explanation is null)
+{
+    <p class="muted">Pas d'explication pour @Indicator.Kind.</p>
+}
+else
+{
+    <div class="indicator-help">
+        <p><strong>Ce qu'il mesure.</strong> @explanation.Measures</p>
+        <p><strong>Calcul.</strong> @explanation.Computation</p>
+        <p><strong>Lecture.</strong> @explanation.Reading</p>
+
+        <div class="help-grid">
+            <div>
+                <h3>Paramètres</h3>
+                <dl>
+                    @foreach (var parameter in Indicator.Defaults)
+                    {
+                        <dt><code>@parameter.Name</code> <span class="muted">défaut @Labels.Plain(parameter.Value)</span></dt>
+                        <dd>@explanation.Parameters.GetValueOrDefault(parameter.Name)</dd>
+                    }
+                </dl>
+            </div>
+            <div>
+                <h3>Lignes produites</h3>
+                <dl>
+                    @foreach (var line in Indicator.Lines)
+                    {
+                        <dt><code>@line</code></dt>
+                        <dd>@explanation.Lines.GetValueOrDefault(line)</dd>
+                    }
+                </dl>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IndicatorInfo Indicator { get; set; } = default!;
+}

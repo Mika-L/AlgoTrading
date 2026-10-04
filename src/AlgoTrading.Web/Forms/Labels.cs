@@ -75,5 +75,8 @@ public static class Labels
     public static string Number(decimal value, int decimals = 2) =>
         value.ToString("N" + decimals.ToString(CultureInfo.InvariantCulture), French);
 
+    /// <summary>Un nombre sans zéros superflus : « 2 », « 0,02 ».</summary>
+    public static string Plain(decimal value) => value.ToString("0.############", French);
+
     public static string Date(DateOnly date) => date.ToString("dd/MM/yyyy", French);
 }
