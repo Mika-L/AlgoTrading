@@ -1,5 +1,6 @@
 using AlgoTrading.Domain.MarketData;
 using AlgoTrading.Domain.Reporting;
+using AlgoTrading.Domain.Strategies;
 
 namespace AlgoTrading.Domain.Backtesting;
 
@@ -24,12 +25,38 @@ public sealed record WalkForwardRequest
 
     /// <summary>Durée de chaque fenêtre de test, et pas du décalage d'une fenêtre à la suivante.</summary>
     public int TestMonths { get; init; } = 12;
+
+    /// <summary>
+    /// Cribler le catalogue <b>dans</b> chaque fenêtre d'apprentissage et n'en combiner que les
+    /// meilleures variantes de chaque indicateur, ce nombre-ci. Absent, le catalogue entier est
+    /// combiné. Cribler hors des fenêtres, sur une période qui recouvre les tests, ferait fuir
+    /// l'avenir dans le choix des règles.
+    /// </summary>
+    public int? ScreenTopPerIndicator { get; init; }
+
+    /// <summary>
+    /// Ne jouer le gagnant d'une fenêtre que s'il a fait mieux que l'achat-conservation en
+    /// apprentissage, selon l'objectif de classement. Sinon la fenêtre de test se passe en
+    /// liquidités : ne rien trouver est une réponse, pas une raison de jouer le moins mauvais.
+    /// </summary>
+    public bool RequireEdge { get; init; }
 }
 
+/// <summary>Étape d'une fenêtre de walk-forward en cours de calcul.</summary>
+public enum WalkForwardStage
+{
+    Screening,
+    Combining,
+}
+
+/// <param name="Screening">Le criblage mené dans la fenêtre d'apprentissage, s'il a été demandé.</param>
+/// <param name="Catalog">Les règles combinées dans la fenêtre : le catalogue entier, ou ce que le
+/// criblage en a retenu.</param>
 /// <param name="Training">L'exploration menée sur la fenêtre d'apprentissage.</param>
-/// <param name="Selected">La meilleure combinaison de l'apprentissage, ou rien si aucune n'a
-/// atteint le nombre minimal de trades — la fenêtre de test se passe alors en liquidités.</param>
-/// <param name="Test">La combinaison retenue jouée sur la fenêtre de test, qu'elle n'a jamais vue.</param>
+/// <param name="Selected">La meilleure combinaison de l'apprentissage, s'il y en a une.</param>
+/// <param name="Test">La combinaison retenue jouée sur la fenêtre de test, qu'elle n'a jamais vue ;
+/// rien quand la fenêtre se passe en liquidités.</param>
+/// <param name="CashReason">Pourquoi la fenêtre de test se passe en liquidités, le cas échéant.</param>
 /// <param name="Benchmark">L'univers acheté à parts égales et conservé sur la même fenêtre de test.</param>
 /// <param name="BenchmarkReturn">Rendement de cette référence sur la fenêtre, depuis le capital initial.</param>
 public sealed record WalkForwardWindow(
@@ -37,13 +64,16 @@ public sealed record WalkForwardWindow(
     DateOnly TrainTo,
     DateOnly TestFrom,
     DateOnly TestTo,
+    ScreeningReport? Screening,
+    IReadOnlyList<RuleConfig> Catalog,
     OptimizationReport Training,
     OptimizationCandidate? Selected,
     BacktestResult? Test,
+    string? CashReason,
     IReadOnlyList<EquityPoint> Benchmark,
     decimal BenchmarkReturn);
 
-public sealed record WalkForwardProgress(int Window, int WindowCount, OptimizationProgress Optimization);
+public sealed record WalkForwardProgress(int Window, int WindowCount, WalkForwardStage Stage, OptimizationProgress Optimization);
 
 /// <param name="OutOfSampleCurve">Les fenêtres de test mises bout à bout, chacune repartant de
 /// l'actif où la précédente s'est arrêtée.</param>
@@ -61,8 +91,11 @@ public sealed record WalkForwardReport(
     public decimal OutperformingWindowShare =>
         Windows.Count == 0 ? 0m : (decimal)Windows.Count(static w => (w.Test?.Metrics.TotalReturn ?? 0m) > w.BenchmarkReturn) / Windows.Count;
 
-    /// <summary>Combinaisons essayées sur l'ensemble des fenêtres.</summary>
-    public long Evaluated => Windows.Sum(static w => w.Training.Evaluated);
+    /// <summary>
+    /// Stratégies essayées sur l'ensemble des fenêtres, variantes criblées comprises : chacune est
+    /// une chance de plus de tomber par hasard sur un bon score.
+    /// </summary>
+    public long Evaluated => Windows.Sum(static w => w.Training.Evaluated + (w.Screening?.Evaluated ?? 0));
 
     /// <summary>Part des fenêtres de test terminées en gain.</summary>
     public decimal ProfitableWindowShare =>
@@ -131,18 +164,43 @@ public sealed class WalkForward
             var (trainFrom, trainTo, testFrom, testTo) = windows[index];
             var window = index + 1;
 
-            var training = new StrategyOptimizer().Run(
-                optimization with { From = trainFrom, To = trainTo, Cache = cache },
-                progress is null ? null : new WindowProgress(progress, window, windows.Count),
-                cancellationToken);
+            var training = optimization with { From = trainFrom, To = trainTo, Cache = cache };
+            ScreeningReport? screening = null;
+            var catalog = optimization.Catalog;
 
-            var selected = training.Top.Count > 0 ? training.Top[0] : null;
+            if (request.ScreenTopPerIndicator is { } perIndicator)
+            {
+                screening = new RuleScreening().Run(
+                    training,
+                    progress is null ? null : new WindowProgress(progress, window, windows.Count, WalkForwardStage.Screening),
+                    cancellationToken);
 
-            var test = selected is null
+                catalog = screening.Shortlist(perIndicator);
+            }
+
+            var explored = catalog.Count == 0
+                ? OptimizationReport.Empty
+                : new StrategyOptimizer().Run(
+                    training with { Catalog = catalog },
+                    progress is null ? null : new WindowProgress(progress, window, windows.Count, WalkForwardStage.Combining),
+                    cancellationToken);
+
+            var selected = explored.Top.Count > 0 ? explored.Top[0] : null;
+
+            var cashReason = (catalog.Count, selected) switch
+            {
+                (0, _) => "aucune variante ne passe le criblage",
+                _ when explored.Evaluated == 0 => "trop peu de règles retenues pour former une combinaison",
+                (_, null) => "aucune combinaison assez active",
+                _ when request.RequireEdge && !(selected.Score > explored.BenchmarkScore) => "aucune ne bat le marché en apprentissage",
+                _ => null,
+            };
+
+            var test = cashReason is not null
                 ? null
                 : new BacktestEngine().Run(new BacktestRequest
                 {
-                    Strategy = selected.Strategy,
+                    Strategy = selected!.Strategy,
                     Universe = optimization.Universe,
                     InitialCash = optimization.InitialCash,
                     From = testFrom,
@@ -153,7 +211,8 @@ public sealed class WalkForward
             var benchmark = BuyAndHold.Curve(optimization.Universe, testFrom, testTo, optimization.InitialCash);
             var benchmarkReturn = benchmark.Count == 0 ? 0m : (benchmark[^1].Equity / optimization.InitialCash) - 1m;
 
-            played.Add(new WalkForwardWindow(trainFrom, trainTo, testFrom, testTo, training, selected, test, benchmark, benchmarkReturn));
+            played.Add(new WalkForwardWindow(
+                trainFrom, trainTo, testFrom, testTo, screening, catalog, explored, selected, test, cashReason, benchmark, benchmarkReturn));
         }
 
         var curve = Chain(played.Select(w => w.Test is { EquityCurve.Count: > 0 } test
@@ -228,8 +287,8 @@ public sealed class WalkForward
         [.. sessions.Sessions.Select(date => new EquityPoint(date, cash, cash, 0m))];
 
     /// <summary>Rattache la progression d'une exploration à sa fenêtre.</summary>
-    private sealed class WindowProgress(IProgress<WalkForwardProgress> inner, int window, int count) : IProgress<OptimizationProgress>
+    private sealed class WindowProgress(IProgress<WalkForwardProgress> inner, int window, int count, WalkForwardStage stage) : IProgress<OptimizationProgress>
     {
-        public void Report(OptimizationProgress value) => inner.Report(new WalkForwardProgress(window, count, value));
+        public void Report(OptimizationProgress value) => inner.Report(new WalkForwardProgress(window, count, stage, value));
     }
 }

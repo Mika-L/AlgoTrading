@@ -20,6 +20,8 @@ public sealed record ScreenRulesRequest
     public decimal InitialCash { get; init; } = 100_000m;
 
     public bool Parallel { get; init; } = true;
+
+    public RankingObjective Objective { get; init; } = RankingObjective.Calmar;
 }
 
 public sealed class ScreenRulesHandler(IMarketDataRepository repository)
@@ -45,6 +47,7 @@ public sealed class ScreenRulesHandler(IMarketDataRepository repository)
                     MinimumTrades = request.MinimumTrades,
                     InitialCash = request.InitialCash,
                     Parallel = request.Parallel,
+                    Objective = request.Objective,
                 },
                 progress,
                 cancellationToken),
