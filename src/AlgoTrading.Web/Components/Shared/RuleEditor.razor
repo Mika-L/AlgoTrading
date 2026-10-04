@@ -3,12 +3,17 @@
 
 @{
     var indicator = Catalog.Find(Rule.Indicator);
+    var explanation = IndicatorGuide.Find(Rule.Indicator);
 }
 
 <div class="rule">
     <div class="rule-head">
         <span class="rule-index">@(Index + 1)</span>
         <strong>@Rule.Indicator</strong>
+        @if (explanation is not null)
+        {
+            <span class="muted">@explanation.Name ·</span>
+        }
         <span class="muted">@Labels.RuleType(Rule.Type)</span>
         <span class="spacer"></span>
         <button class="btn ghost small" title="Monter" disabled="@(Index == 0)" @onclick="() => OnMove.InvokeAsync(-1)">↑</button>
@@ -48,7 +53,7 @@
             @foreach (var parameter in indicator.Defaults)
             {
                 var name = parameter.Name;
-                <label class="field">
+                <label class="field" title="@explanation?.Parameters.GetValueOrDefault(name)">
                     <span>@name</span>
                     <input type="number" step="any" value="@Invariant(Rule.Parameters.GetValueOrDefault(name, parameter.Value))"
                            @onchange="e => SetParameter(name, e.Value)" />
@@ -130,6 +135,14 @@
     </div>
 
     <p class="rule-hint">@Labels.RuleHint(Rule.Type)</p>
+
+    @if (indicator is not null)
+    {
+        <details class="rule-help">
+            <summary>Comprendre @Rule.Indicator et ses paramètres</summary>
+            <IndicatorHelp Indicator="indicator" />
+        </details>
+    }
 </div>
 
 @code {

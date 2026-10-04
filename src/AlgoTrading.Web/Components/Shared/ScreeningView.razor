@@ -13,7 +13,7 @@
 
     <div class="card">
         <div class="card-header">
-            <h2>@group.Indicator</h2>
+            <h2>@group.Indicator <a class="help-link" href="indicators#@group.Indicator" target="_blank" title="Ce que mesure @group.Indicator et ses paramètres">?</a></h2>
             <span class="muted">@group.Variants.Count variante@(group.Variants.Count > 1 ? "s" : null) · meilleur voisinage @Labels.Number(group.Variants[0].NeighbourhoodScore)</span>
         </div>
 

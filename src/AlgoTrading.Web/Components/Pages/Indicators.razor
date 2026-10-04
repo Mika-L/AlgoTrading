@@ -1,0 +1,29 @@
+@page "/indicators"
+@inject IndicatorLineCatalog Catalog
+
+<PageTitle>Indicateurs · AlgoTrading</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Indicateurs</h1>
+        <p class="muted">Ce que mesure chaque indicateur, comment il se calcule et se lit, et le rôle de ses paramètres.</p>
+    </div>
+</div>
+
+<nav class="card indicator-index">
+    @foreach (var indicator in Catalog.Indicators)
+    {
+        <a href="indicators#@indicator.Kind">@indicator.Kind</a>
+    }
+</nav>
+
+@foreach (var indicator in Catalog.Indicators)
+{
+    <section class="card" id="@indicator.Kind">
+        <div class="card-header">
+            <h2>@indicator.Kind</h2>
+            <span class="muted">@IndicatorGuide.Find(indicator.Kind)?.Name</span>
+        </div>
+        <IndicatorHelp Indicator="indicator" />
+    </section>
+}
