@@ -25,7 +25,7 @@ public class ScreeningHeatmapTests
         var strategy = new StrategyDefinition { Name = "Rsi", Entry = new SignalPolicy { Rules = [rule] } };
         var axes = new Dictionary<string, decimal> { [Period] = period, ["BullishBelow"] = bullishBelow, ["BearishAbove"] = bearishAbove, ["Weight"] = 1m };
 
-        return new ScreenedVariant(strategy, family, axes, "Rsi", PerformanceMetrics.Empty with { Calmar = calmar }, eligible, 0, calmar, null);
+        return new ScreenedVariant(strategy, family, axes, "Rsi", PerformanceMetrics.Empty with { Calmar = calmar }, calmar, eligible, 0, calmar, null);
     }
 
     [Fact]

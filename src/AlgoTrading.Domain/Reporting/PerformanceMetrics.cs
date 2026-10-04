@@ -109,6 +109,61 @@ public static class PerformanceCalculator
         };
     }
 
+    /// <summary>
+    /// Ratio d'information : rendement quotidien en excès de la référence, rapporté à la
+    /// volatilité de cet excès, annualisé. Positif, la courbe a fait mieux que la référence
+    /// séance après séance plus souvent et plus nettement qu'elle n'a fait moins bien.
+    /// <para>Seules comptent les séances que les deux courbes partagent avec la précédente.
+    /// Face à elle-même, la référence obtient zéro.</para>
+    /// </summary>
+    public static decimal InformationRatio(IReadOnlyList<EquityPoint> curve, IReadOnlyList<EquityPoint> benchmark)
+    {
+        ArgumentNullException.ThrowIfNull(curve);
+        ArgumentNullException.ThrowIfNull(benchmark);
+
+        var reference = new Dictionary<DateOnly, decimal>(benchmark.Count);
+        foreach (var point in benchmark)
+        {
+            reference[point.Date] = point.Equity;
+        }
+
+        var excess = new List<decimal>(curve.Count);
+
+        for (var i = 1; i < curve.Count; i++)
+        {
+            var previous = curve[i - 1];
+            var current = curve[i];
+
+            if (previous.Equity == 0m
+                || !reference.TryGetValue(previous.Date, out var referencePrevious)
+                || !reference.TryGetValue(current.Date, out var referenceCurrent)
+                || referencePrevious == 0m)
+            {
+                continue;
+            }
+
+            excess.Add(((current.Equity / previous.Equity) - 1m) - ((referenceCurrent / referencePrevious) - 1m));
+        }
+
+        if (excess.Count < 2)
+        {
+            return 0m;
+        }
+
+        var mean = excess.Average();
+        var variance = 0m;
+
+        foreach (var value in excess)
+        {
+            var deviation = value - mean;
+            variance += deviation * deviation;
+        }
+
+        var deviationOfExcess = DecimalMath.Sqrt(variance / excess.Count);
+
+        return deviationOfExcess == 0m ? 0m : mean / deviationOfExcess * DecimalMath.Sqrt(SessionsPerYear);
+    }
+
     private static decimal MaxDrawdown(IReadOnlyList<EquityPoint> curve)
     {
         var peak = curve[0].Equity;

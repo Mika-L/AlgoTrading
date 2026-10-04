@@ -34,6 +34,12 @@ public sealed record RunWalkForwardRequest
     public decimal InitialCash { get; init; } = 100_000m;
 
     public bool Parallel { get; init; } = true;
+
+    public RankingObjective Objective { get; init; } = RankingObjective.Calmar;
+
+    public int? ScreenTopPerIndicator { get; init; }
+
+    public bool RequireEdge { get; init; }
 }
 
 public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
@@ -64,12 +70,15 @@ public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
                         OneVariantPerIndicator = request.OneVariantPerIndicator,
                         InitialCash = request.InitialCash,
                         Parallel = request.Parallel,
+                        Objective = request.Objective,
                         Top = 1,
                     },
                     From = request.From,
                     To = request.To,
                     TrainingMonths = request.TrainingMonths,
                     TestMonths = request.TestMonths,
+                    ScreenTopPerIndicator = request.ScreenTopPerIndicator,
+                    RequireEdge = request.RequireEdge,
                 },
                 progress,
                 cancellationToken),

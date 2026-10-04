@@ -61,6 +61,19 @@
             <span>Trades minimum</span>
             <input type="number" min="0" @bind="_minimumTrades" disabled="@Running" />
         </label>
+        <label class="field">
+            <span>Objectif de classement</span>
+            <select @bind="_objective" disabled="@Running">
+                @foreach (var objective in Enum.GetValues<RankingObjective>())
+                {
+                    <option value="@objective">@Ranking.Name(objective)</option>
+                }
+            </select>
+            @if (_objective == RankingObjective.InformationRatio)
+            {
+                <small>Écart quotidien au marché, rapporté à sa volatilité.</small>
+            }
+        </label>
 
         @if (_mode == Mode.WalkForward)
         {
@@ -88,6 +101,15 @@
                 <span>Graine</span>
                 <input type="number" min="0" @bind="_seed" disabled="@Running" />
             </label>
+            <label class="field">
+                <span>Criblage par fenêtre</span>
+                <input type="number" min="1" placeholder="aucun" @bind="_screenTop" disabled="@Running" />
+                <small>Variantes gardées par indicateur, choisies dans chaque apprentissage.</small>
+            </label>
+            <div class="field">
+                <span>Battre le marché</span>
+                <label class="check"><input type="checkbox" @bind="_requireEdge" disabled="@Running" /> Sinon, rester en liquidités</label>
+            </div>
         }
     </div>
 
@@ -99,7 +121,11 @@
     {
         <p class="muted">
             @_catalog.Rules.Count règles@(_catalog.Discarded > 0 ? $", {_catalog.Discarded} variantes invalides écartées" : null).
-            @if (_mode == Mode.WalkForward)
+            @if (_mode == Mode.WalkForward && _screenTop is not null)
+            {
+                <text> Le criblage de chaque fenêtre décide des règles combinées.</text>
+            }
+            else if (_mode == Mode.WalkForward)
             {
                 <text> @_space.ToString("N0", CultureInfo.CurrentCulture) combinaisons possibles par fenêtre</text>
                 @if (_sample is null && _space > LargeSpace)
@@ -142,12 +168,12 @@
 
 @if (_mode == Mode.Screening && _screening is not null)
 {
-    <ScreeningView Report="_screening" OnRetain="Retain" />
+    <ScreeningView Report="_screening" Objective="_rankedBy" OnRetain="Retain" />
 }
 
 @if (_mode == Mode.WalkForward && _walkForward is not null)
 {
-    <WalkForwardView Report="_walkForward" InitialCash="InitialCash" OnRetain="Retain" />
+    <WalkForwardView Report="_walkForward" Objective="_rankedBy" InitialCash="InitialCash" OnRetain="Retain" />
 }
 
 @code {
@@ -178,6 +204,12 @@
     private int _maximumRules = 4;
     private long? _sample = 3_000;
     private ulong _seed = 1;
+    private RankingObjective _objective = RankingObjective.Calmar;
+    private int? _screenTop;
+    private bool _requireEdge;
+
+    /// <summary>L'objectif du dernier calcul : changer le choix ne doit pas réétiqueter un résultat déjà affiché.</summary>
+    private RankingObjective _rankedBy;
 
     private CancellationTokenSource? _run;
     private long _done;
@@ -239,6 +271,7 @@
         _done = 0;
         _planned = 0;
         _progressText = "Chargement des cotations…";
+        _rankedBy = _objective;
 
         var token = _run.Token;
         var refresh = TimeSpan.FromMilliseconds(250);
@@ -266,6 +299,7 @@
                         To = _to,
                         MinimumTrades = _minimumTrades,
                         InitialCash = InitialCash,
+                        Objective = _objective,
                     },
                     progress,
                     token);
@@ -274,14 +308,23 @@
             {
                 _walkForward = null;
 
+                var screened = _screenTop is not null;
                 var progress = new ThrottledProgress<WalkForwardProgress>(
                     value =>
                     {
-                        // Avancement global : les fenêtres passées, plus la part faite de la fenêtre en cours.
+                        // Avancement global : les fenêtres passées, plus la part faite de la fenêtre en cours,
+                        // criblage et combinaisons comptant chacun pour moitié quand il y a criblage.
                         var current = value.Optimization;
                         var share = current.Planned == 0 ? 0 : (double)current.Evaluated / current.Planned;
+                        if (screened)
+                        {
+                            share = (share + (value.Stage == WalkForwardStage.Combining ? 1 : 0)) / 2;
+                        }
+
                         (_done, _planned) = ((long)(((value.Window - 1) + share) * 1_000), value.WindowCount * 1_000L);
-                        _progressText = $"Fenêtre {value.Window}/{value.WindowCount} — {current.Evaluated:N0} / {current.Planned:N0} combinaisons";
+                        _progressText = value.Stage == WalkForwardStage.Screening
+                            ? $"Fenêtre {value.Window}/{value.WindowCount} — criblage, {current.Evaluated:N0} / {current.Planned:N0} variantes"
+                            : $"Fenêtre {value.Window}/{value.WindowCount} — {current.Evaluated:N0} / {current.Planned:N0} combinaisons";
                     },
                     () => InvokeAsync(StateHasChanged),
                     refresh);
@@ -300,6 +343,9 @@
                         SampleSize = _sample,
                         Seed = _seed,
                         InitialCash = InitialCash,
+                        Objective = _objective,
+                        ScreenTopPerIndicator = _screenTop,
+                        RequireEdge = _requireEdge,
                     },
                     progress,
                     token);

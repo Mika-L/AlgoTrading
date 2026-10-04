@@ -92,9 +92,10 @@ public static class BacktestCommands
         var to = new Option<DateOnly?>("--to") { Description = "Dernière séance." };
         var cash = new Option<decimal>("--cash") { Description = "Capital de départ.", DefaultValueFactory = _ => 100_000m };
         var save = new Option<bool>("--save") { Description = "Persiste les combinaisons retenues." };
+        var objective = ObjectiveOption();
 
         var command = new Command("optimize", "Explore les combinaisons de règles et les classe.");
-        foreach (var option in new Option[] { rules, minK, maxK, top, minTrades, sample, seed, allowVariants, parallel, from, to, cash, save })
+        foreach (var option in new Option[] { rules, minK, maxK, top, minTrades, sample, seed, allowVariants, parallel, from, to, cash, save, objective })
         {
             command.Add(option);
         }
@@ -110,6 +111,7 @@ public static class BacktestCommands
                 return 1;
             }
 
+            var ranking = parse.GetValue(objective);
             var response = await services.GetRequiredService<OptimizeStrategyHandler>().HandleAsync(
                 new OptimizeStrategyRequest
                 {
@@ -126,8 +128,9 @@ public static class BacktestCommands
                     InitialCash = parse.GetValue(cash),
                     Parallel = parse.GetValue(parallel),
                     Save = parse.GetValue(save),
+                    Objective = ranking,
                 },
-                new ConsoleProgress(output),
+                new ConsoleProgress(output, ranking),
                 cancellationToken).ConfigureAwait(false);
 
             var report = response.Report;
@@ -149,22 +152,25 @@ public static class BacktestCommands
                 return 0;
             }
 
-            output.WriteLine("Classement par Calmar — rendement annualisé rapporté à la pire baisse.");
+            output.WriteLine(report.BenchmarkScore is { } bar
+                ? $"Classement par {Ranking.Name(ranking)}. Acheter et conserver l'univers obtient {bar.ToString("0.00", CultureInfo.CurrentCulture)}."
+                : $"Classement par {Ranking.Name(ranking)}.");
             output.WriteLine();
 
+            var alongside = Alongside(ranking);
             output.WriteTable(
-                ["Rang", "Combinaison", "Calmar", "Sharpe", "Rendement", "Pire baisse", "Trades"],
+                ["Rang", "Combinaison", Ranking.Name(ranking), .. alongside.Select(static m => m.Name), "Rendement", "Pire baisse", "Trades"],
                 [
-                    .. report.Top.Select((c, i) => new[]
-                    {
+                    .. report.Top.Select(string[] (c, i) =>
+                    [
                         (i + 1).ToString(CultureInfo.CurrentCulture),
                         c.Strategy.Name,
                         c.Score.ToString("0.00", CultureInfo.CurrentCulture),
-                        c.Metrics.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+                        .. alongside.Select(m => m.Read(c.Metrics).ToString("0.00", CultureInfo.CurrentCulture)),
                         ConsoleWriter.Percent(c.Metrics.TotalReturn),
                         ConsoleWriter.Percent(c.Metrics.MaxDrawdown),
                         c.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
-                    }),
+                    ]),
                 ]);
 
             if (response.SavedRunIds.Count > 0)
@@ -184,14 +190,15 @@ public static class BacktestCommands
         var rules = new Option<FileInfo?>("--rules") { Description = "Catalogue de règles, plages comprises ; par défaut, les douze indicateurs directionnels." };
         var perIndicator = new Option<int>("--top-per-indicator") { Description = "Variantes affichées, et exportées, par indicateur.", DefaultValueFactory = _ => 3 };
         var minTrades = new Option<int>("--min-trades") { Description = "En deçà, une variante compte pour zéro dans son voisinage.", DefaultValueFactory = _ => 20 };
-        var export = new Option<FileInfo?>("--export") { Description = "Écrit les variantes retenues en catalogue, prêt pour optimize ou walk-forward." };
+        var export = new Option<FileInfo?>("--export") { Description = "Écrit en catalogue, prêt pour optimize ou walk-forward, les meilleures variantes éligibles de chaque indicateur dont le voisinage est positif." };
         var parallel = new Option<bool>("--parallel") { Description = "Répartit l'exploration sur tous les cœurs.", DefaultValueFactory = _ => true };
         var from = new Option<DateOnly?>("--from") { Description = "Première séance." };
         var to = new Option<DateOnly?>("--to") { Description = "Dernière séance." };
         var cash = new Option<decimal>("--cash") { Description = "Capital de départ.", DefaultValueFactory = _ => 100_000m };
+        var objective = ObjectiveOption();
 
         var command = new Command("screen", "Joue chaque variante seule et la juge avec ses voisines de grille, indicateur par indicateur.");
-        foreach (var option in new Option[] { rules, perIndicator, minTrades, export, parallel, from, to, cash })
+        foreach (var option in new Option[] { rules, perIndicator, minTrades, export, parallel, from, to, cash, objective })
         {
             command.Add(option);
         }
@@ -213,6 +220,8 @@ public static class BacktestCommands
                 return 1;
             }
 
+            var ranking = parse.GetValue(objective);
+            var name = Ranking.Name(ranking);
             var report = await services.GetRequiredService<ScreenRulesHandler>().HandleAsync(
                 new ScreenRulesRequest
                 {
@@ -222,33 +231,35 @@ public static class BacktestCommands
                     To = parse.GetValue(to),
                     InitialCash = parse.GetValue(cash),
                     Parallel = parse.GetValue(parallel),
+                    Objective = ranking,
                 },
-                new ConsoleProgress(output),
+                new ConsoleProgress(output, ranking),
                 cancellationToken).ConfigureAwait(false);
 
             var shown = Math.Max(1, parse.GetValue(perIndicator));
+            var alongside = Alongside(ranking);
 
             output.WriteLine();
-            output.WriteLine("Voisinage : Calmar moyen de la variante et de ses voisines (un réglage décalé d'un cran).");
-            output.WriteLine($"Un plateau le garde proche du Calmar ; un pic isolé l'en éloigne. Moins de {parse.GetValue(minTrades)} trades compte pour zéro.");
+            output.WriteLine($"Voisinage : {name} moyen de la variante et de ses voisines (un réglage décalé d'un cran).");
+            output.WriteLine($"Un plateau le garde proche du score ; un pic isolé l'en éloigne. Moins de {parse.GetValue(minTrades)} trades compte pour zéro.");
 
             foreach (var group in report.Groups)
             {
                 output.WriteLine();
                 output.WriteLine($"{group.Indicator} — {group.Variants.Count} variantes");
                 output.WriteTable(
-                    ["Variante", "Voisinage", "Calmar", "Pire voisine", "Voisines", "Sharpe", "Trades"],
+                    ["Variante", "Voisinage", name, "Pire voisine", "Voisines", .. alongside.Select(static m => m.Name), "Trades"],
                     [
-                        .. group.Variants.Take(shown).Select(v => new[]
-                        {
+                        .. group.Variants.Take(shown).Select(string[] (v) =>
+                        [
                             v.Label,
                             v.NeighbourhoodScore.ToString("0.00", CultureInfo.CurrentCulture),
                             v.Score.ToString("0.00", CultureInfo.CurrentCulture) + (v.Eligible ? string.Empty : " *"),
                             v.WorstNeighbour?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                             v.Neighbours.ToString(CultureInfo.CurrentCulture),
-                            v.Metrics.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+                            .. alongside.Select(m => m.Read(v.Metrics).ToString("0.00", CultureInfo.CurrentCulture)),
                             v.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
-                        }),
+                        ]),
                     ]);
             }
 
@@ -257,10 +268,7 @@ public static class BacktestCommands
 
             if (parse.GetValue(export) is { } target)
             {
-                IReadOnlyList<RuleConfig> retained =
-                [
-                    .. report.Groups.SelectMany(g => g.Variants.Where(static v => v.Eligible).Take(shown)).Select(static v => v.Rule),
-                ];
+                var retained = report.Shortlist(shown);
 
                 await File.WriteAllTextAsync(
                     target.FullName,
@@ -291,9 +299,12 @@ public static class BacktestCommands
         var from = new Option<DateOnly?>("--from") { Description = "Début de la première fenêtre." };
         var to = new Option<DateOnly?>("--to") { Description = "Fin de la dernière fenêtre — s'arrêter avant la période réservée au verdict final." };
         var cash = new Option<decimal>("--cash") { Description = "Capital de départ.", DefaultValueFactory = _ => 100_000m };
+        var objective = ObjectiveOption();
+        var screenTop = new Option<int?>("--screen-top") { Description = "Crible le catalogue dans chaque fenêtre d'apprentissage et n'en combine que ce nombre de variantes par indicateur." };
+        var requireEdge = new Option<bool>("--require-edge") { Description = "Reste en liquidités quand le gagnant d'apprentissage ne bat pas le marché sur l'objectif." };
 
         var command = new Command("walk-forward", "Optimise sur une fenêtre, joue le gagnant sur la suivante, et recommence.");
-        foreach (var option in new Option[] { rules, training, test, minK, maxK, minTrades, sample, seed, allowVariants, parallel, from, to, cash })
+        foreach (var option in new Option[] { rules, training, test, minK, maxK, minTrades, sample, seed, allowVariants, parallel, from, to, cash, objective, screenTop, requireEdge })
         {
             command.Add(option);
         }
@@ -308,6 +319,14 @@ public static class BacktestCommands
                 return 1;
             }
 
+            if (parse.GetValue(screenTop) is < 1)
+            {
+                output.WriteWarning("--screen-top doit valoir au moins 1.");
+                return 1;
+            }
+
+            var ranking = parse.GetValue(objective);
+            var name = Ranking.Name(ranking);
             var report = await services.GetRequiredService<RunWalkForwardHandler>().HandleAsync(
                 new RunWalkForwardRequest
                 {
@@ -324,6 +343,9 @@ public static class BacktestCommands
                     To = parse.GetValue(to),
                     InitialCash = parse.GetValue(cash),
                     Parallel = parse.GetValue(parallel),
+                    Objective = ranking,
+                    ScreenTopPerIndicator = parse.GetValue(screenTop),
+                    RequireEdge = parse.GetValue(requireEdge),
                 },
                 new ConsoleWalkForwardProgress(output),
                 cancellationToken).ConfigureAwait(false);
@@ -333,14 +355,16 @@ public static class BacktestCommands
             output.WriteLine();
 
             output.WriteTable(
-                ["Apprentissage", "Test", "Retenue", "Calmar appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
+                ["Apprentissage", "Test", "Règles", "Retenue", $"{name} appr.", "Marché appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
                 [
                     .. report.Windows.Select(w => new[]
                     {
                         $"{w.TrainFrom:yyyy-MM-dd} → {w.TrainTo:yyyy-MM-dd}",
                         $"{w.TestFrom:yyyy-MM-dd} → {w.TestTo:yyyy-MM-dd}",
-                        w.Selected?.Strategy.Name ?? "aucune — en liquidités",
+                        w.Catalog.Count.ToString(CultureInfo.CurrentCulture),
+                        w.Test is null ? $"en liquidités — {w.CashReason}" : w.Selected!.Strategy.Name,
                         w.Selected?.Score.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                        w.Training.BenchmarkScore?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                         w.Test is null ? "—" : ConsoleWriter.Percent(w.Test.Metrics.TotalReturn),
                         ConsoleWriter.Percent(w.BenchmarkReturn),
                         w.Test?.Metrics.Calmar.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
@@ -367,13 +391,29 @@ public static class BacktestCommands
             output.WriteLine();
             output.WriteLine($"Fenêtres gagnantes : {ConsoleWriter.Percent(report.ProfitableWindowShare)}. Fenêtres au-dessus du marché : {ConsoleWriter.Percent(report.OutperformingWindowShare)}. Trades : {report.OutOfSample.TradeCount:N0}.");
             output.WriteLine($"Efficacité (rendement annualisé en test rapporté à l'apprentissage) : {report.Efficiency?.ToString("0.00", CultureInfo.CurrentCulture) ?? "indéfinie"}.");
-            output.WriteLine($"{report.Evaluated:N0} combinaisons essayées au total.");
+            output.WriteLine($"{report.Evaluated:N0} stratégies essayées au total, variantes criblées comprises.");
 
             return 0;
         });
 
         return command;
     }
+
+    /// <summary>Les mesures affichées à côté du score, sans répéter celle qui sert d'objectif.</summary>
+    private static (string Name, Func<PerformanceMetrics, decimal> Read)[] Alongside(RankingObjective objective) =>
+    [
+        .. new (RankingObjective Objective, Func<PerformanceMetrics, decimal> Read)[]
+        {
+            (RankingObjective.Calmar, static m => m.Calmar),
+            (RankingObjective.Sharpe, static m => m.Sharpe),
+        }.Where(m => m.Objective != objective).Select(static m => (Ranking.Name(m.Objective), m.Read)),
+    ];
+
+    private static Option<RankingObjective> ObjectiveOption() => new("--objective")
+    {
+        Description = "Ce que le classement maximise : Calmar, Sharpe, ou InformationRatio, l'écart au marché rapporté à sa volatilité.",
+        DefaultValueFactory = _ => RankingObjective.Calmar,
+    };
 
     /// <summary>Le catalogue d'un fichier, plages développées, ou le catalogue par défaut ; rien si le fichier manque.</summary>
     private static async Task<IReadOnlyList<RuleConfig>?> ReadCatalogAsync(FileInfo? file, IConsoleWriter output, CancellationToken cancellationToken)
@@ -401,13 +441,13 @@ public static class BacktestCommands
     private sealed class ConsoleWalkForwardProgress(IConsoleWriter output) : IProgress<WalkForwardProgress>
     {
         private readonly Lock _gate = new();
-        private (int Window, long Evaluated) _shown;
+        private (int Window, WalkForwardStage Stage, long Evaluated) _shown;
 
         public void Report(WalkForwardProgress value)
         {
             lock (_gate)
             {
-                var current = (value.Window, value.Optimization.Evaluated);
+                var current = (value.Window, value.Stage, value.Optimization.Evaluated);
                 if (current.CompareTo(_shown) <= 0)
                 {
                     return;
@@ -415,7 +455,8 @@ public static class BacktestCommands
 
                 _shown = current;
                 var optimization = value.Optimization;
-                output.Write($"\rFenêtre {value.Window}/{value.WindowCount} — {optimization.Evaluated:N0} / {optimization.Planned:N0} ({(double)optimization.Evaluated / optimization.Planned:P0})   ");
+                var stage = value.Stage == WalkForwardStage.Screening ? "criblage" : "combinaisons";
+                output.Write($"\rFenêtre {value.Window}/{value.WindowCount}, {stage} — {optimization.Evaluated:N0} / {optimization.Planned:N0} ({(double)optimization.Evaluated / optimization.Planned:P0})   ");
             }
         }
     }
@@ -425,7 +466,7 @@ public static class BacktestCommands
     /// parallèle, d'où le verrou ; <see cref="Progress{T}"/> ne convient pas, il les livrerait
     /// dans le désordre.
     /// </summary>
-    private sealed class ConsoleProgress(IConsoleWriter output) : IProgress<OptimizationProgress>
+    private sealed class ConsoleProgress(IConsoleWriter output, RankingObjective objective) : IProgress<OptimizationProgress>
     {
         private readonly Lock _gate = new();
         private long _shown;
@@ -441,7 +482,7 @@ public static class BacktestCommands
 
                 _shown = value.Evaluated;
                 var best = value.Best is { } candidate
-                    ? $" — meilleur Calmar {candidate.Score.ToString("0.00", CultureInfo.CurrentCulture)}"
+                    ? $" — meilleur {Ranking.Name(objective)} {candidate.Score.ToString("0.00", CultureInfo.CurrentCulture)}"
                     : string.Empty;
 
                 output.Write($"\r{value.Evaluated:N0} / {value.Planned:N0} ({(double)value.Evaluated / value.Planned:P0}){best}   ");

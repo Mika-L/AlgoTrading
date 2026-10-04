@@ -1,6 +1,6 @@
 <div class="notice">
-    @Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture) variantes jouées seules. Le <strong>voisinage</strong> est le Calmar moyen
-    de la variante et de ses voisines de grille (un réglage décalé d'un cran) : un plateau le garde proche du Calmar, un pic isolé l'en éloigne.
+    @Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture) variantes jouées seules. Le <strong>voisinage</strong> est le @Ranking.Name(Objective) moyen
+    de la variante et de ses voisines de grille (un réglage décalé d'un cran) : un plateau le garde proche du score, un pic isolé l'en éloigne.
     Les indicateurs sont classés sur leur meilleur voisinage.
 </div>
 
@@ -28,10 +28,10 @@
                     <tr>
                         <th>Variante</th>
                         <th class="num">Voisinage</th>
-                        <th class="num">Calmar</th>
+                        <th class="num">@Ranking.Name(Objective)</th>
                         <th class="num">Pire voisine</th>
                         <th class="num">Voisines</th>
-                        <th class="num">Sharpe</th>
+                        <th class="num">@(Objective == RankingObjective.Sharpe ? "Calmar" : "Sharpe")</th>
                         <th class="num">Rendement</th>
                         <th class="num">Trades</th>
                         <th></th>
@@ -52,7 +52,7 @@
                             </td>
                             <td class="num">@(variant.WorstNeighbour is { } worst ? Labels.Number(worst) : "—")</td>
                             <td class="num">@variant.Neighbours</td>
-                            <td class="num">@Labels.Number(variant.Metrics.Sharpe)</td>
+                            <td class="num">@Labels.Number(Objective == RankingObjective.Sharpe ? variant.Metrics.Calmar : variant.Metrics.Sharpe)</td>
                             <td class="num @Tone(variant.Metrics.TotalReturn)">@Labels.SignedPercent(variant.Metrics.TotalReturn)</td>
                             <td class="num">@variant.Metrics.TradeCount.ToString("N0", CultureInfo.CurrentCulture)</td>
                             <td><button class="btn small ghost" @onclick="() => OnRetain.InvokeAsync(variant.Strategy)">Retenir</button></td>
@@ -79,6 +79,9 @@
 
     [Parameter, EditorRequired]
     public ScreeningReport Report { get; set; } = default!;
+
+    [Parameter]
+    public RankingObjective Objective { get; set; }
 
     /// <summary>Enregistre la stratégie à une règle d'une variante, telle qu'elle a été jouée.</summary>
     [Parameter]

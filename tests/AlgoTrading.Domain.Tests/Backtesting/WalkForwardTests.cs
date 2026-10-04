@@ -36,8 +36,8 @@ public class WalkForwardTests
         TestMonths = 6,
     };
 
-    private static WalkForwardReport Run(WalkForwardRequest request) =>
-        new WalkForward().Run(request, cancellationToken: TestContext.Current.CancellationToken);
+    private static WalkForwardReport Run(WalkForwardRequest request, IProgress<WalkForwardProgress>? progress = null) =>
+        new WalkForward().Run(request, progress, TestContext.Current.CancellationToken);
 
     [Fact]
     public void should_slide_by_one_test_period_and_test_right_after_each_training_window()
@@ -125,10 +125,111 @@ public class WalkForwardTests
     }
 
     [Fact]
+    public void should_screen_the_catalog_on_the_training_window_only()
+    {
+        var request = Request() with { ScreenTopPerIndicator = 1 };
+        var report = Run(request);
+
+        foreach (var window in report.Windows)
+        {
+            // Rejoué sur la seule fenêtre d'apprentissage, le criblage doit donner les mêmes scores :
+            // rien de la fenêtre de test n'a pu peser sur le choix des règles.
+            var alone = new RuleScreening().Run(
+                request.Optimization with { From = window.TrainFrom, To = window.TrainTo },
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            window.Screening.ShouldNotBeNull();
+            window.Screening.Groups.SelectMany(static g => g.Variants).Select(static v => v.NeighbourhoodScore)
+                .ShouldBe(alone.Groups.SelectMany(static g => g.Variants).Select(static v => v.NeighbourhoodScore));
+            window.Catalog.ShouldBe(alone.Shortlist(1));
+        }
+    }
+
+    [Fact]
+    public void should_combine_only_the_rules_the_window_screening_kept()
+    {
+        foreach (var window in Run(Request() with { ScreenTopPerIndicator = 1 }).Windows.Where(static w => w.Selected is not null))
+        {
+            window.Selected!.Strategy.Entry.Rules.ShouldAllBe(rule => window.Catalog.Contains(rule));
+        }
+    }
+
+    [Fact]
+    public void should_count_the_screened_variants_among_the_strategies_tried()
+    {
+        var report = Run(Request() with { ScreenTopPerIndicator = 1 });
+
+        // Les 5 variantes du catalogue sont criblées dans chacune des quatre fenêtres.
+        report.Evaluated.ShouldBe((4 * 5) + report.Windows.Sum(static w => w.Training.Evaluated));
+    }
+
+    [Fact]
+    public void should_stay_in_cash_through_a_test_window_where_no_variant_passes_the_screening()
+    {
+        var request = Request() with { ScreenTopPerIndicator = 2 };
+        var report = Run(request with { Optimization = request.Optimization with { MinimumTrades = 1_000_000 } });
+
+        report.Windows.ShouldAllBe(w => w.Catalog.Count == 0 && w.Test == null && w.CashReason == "aucune variante ne passe le criblage");
+    }
+
+    [Fact]
+    public void should_stay_in_cash_when_the_screening_keeps_too_few_rules_to_combine()
+    {
+        // Trois indicateurs au plus après criblage : aucune combinaison de quatre règles distinctes.
+        var request = Request() with { ScreenTopPerIndicator = 1 };
+        var report = Run(request with { Optimization = request.Optimization with { MinimumRules = 4, MaximumRules = 4 } });
+
+        report.Windows.ShouldAllBe(w => w.Catalog.Count > 0 && w.Test == null && w.CashReason == "trop peu de règles retenues pour former une combinaison");
+    }
+
+    [Fact]
+    public void should_report_screening_then_combining_for_each_window()
+    {
+        var stages = new List<(int Window, WalkForwardStage Stage)>();
+        var request = Request() with { ScreenTopPerIndicator = 1 };
+
+        Run(request with { Optimization = request.Optimization with { Parallel = false } }, new SynchronousProgress(p => stages.Add((p.Window, p.Stage))));
+
+        stages.Distinct().ShouldBe(
+        [
+            .. Enumerable.Range(1, 4).SelectMany(static w => new[] { (w, WalkForwardStage.Screening), (w, WalkForwardStage.Combining) }),
+        ]);
+    }
+
+    [Theory]
+    [InlineData(RankingObjective.Calmar)]
+    [InlineData(RankingObjective.InformationRatio)]
+    public void should_only_play_a_winner_that_beat_the_market_in_training_when_an_edge_is_required(RankingObjective objective)
+    {
+        var request = Request();
+        var report = Run(request with { RequireEdge = true, Optimization = request.Optimization with { Objective = objective } });
+
+        foreach (var window in report.Windows)
+        {
+            window.Selected.ShouldNotBeNull();
+            var edge = window.Selected.Score > window.Training.BenchmarkScore;
+
+            (window.Test is not null).ShouldBe(edge);
+            window.CashReason.ShouldBe(edge ? null : "aucune ne bat le marché en apprentissage");
+        }
+    }
+
+    [Fact]
+    public void should_play_the_winner_whatever_the_market_did_when_no_edge_is_required()
+    {
+        Run(Request()).Windows.ShouldAllBe(w => w.Test != null && w.CashReason == null);
+    }
+
+    [Fact]
     public void should_refuse_a_range_too_short_for_one_training_window_and_its_test()
     {
         var error = Should.Throw<ArgumentException>(() => Run(Request() with { TrainingMonths = 48 }));
 
         error.Message.ShouldContain("ne contient pas une fenêtre d'apprentissage de 48 mois");
+    }
+
+    private sealed class SynchronousProgress(Action<WalkForwardProgress> report) : IProgress<WalkForwardProgress>
+    {
+        public void Report(WalkForwardProgress value) => report(value);
     }
 }

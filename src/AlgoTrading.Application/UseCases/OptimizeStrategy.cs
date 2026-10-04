@@ -33,6 +33,8 @@ public sealed record OptimizeStrategyRequest
 
     public bool OneVariantPerIndicator { get; init; } = true;
 
+    public RankingObjective Objective { get; init; } = RankingObjective.Calmar;
+
     /// <summary>Persiste les résultats retenus.</summary>
     public bool Save { get; init; }
 }
@@ -65,6 +67,7 @@ public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IB
             SampleSize = request.SampleSize,
             Seed = request.Seed,
             OneVariantPerIndicator = request.OneVariantPerIndicator,
+            Objective = request.Objective,
         }, progress, cancellationToken);
 
         var saved = new List<int>();

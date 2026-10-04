@@ -63,6 +63,9 @@ public sealed record OptimizationRequest
     /// </summary>
     public bool OneVariantPerIndicator { get; init; } = true;
 
+    /// <summary>Ce que le classement maximise ; le Calmar par défaut.</summary>
+    public RankingObjective Objective { get; init; } = RankingObjective.Calmar;
+
     /// <summary>
     /// Cache d'indicateurs à réutiliser d'une exploration à l'autre sur le même univers — d'une
     /// fenêtre de walk-forward à la suivante, par exemple. Absent, chaque exploration a le sien.
@@ -75,11 +78,8 @@ public sealed record OptimizationRequest
 /// chaque run saturait la mémoire au-delà de quelques dizaines de milliers d'essais. Le détail
 /// se retrouve en rejouant la stratégie.
 /// </summary>
-public sealed record OptimizationCandidate(StrategyDefinition Strategy, PerformanceMetrics Metrics)
-{
-    /// <summary>Critère de classement : le rendement annualisé rapporté à la pire baisse.</summary>
-    public decimal Score => Metrics.Calmar;
-}
+/// <param name="Score">La valeur de l'objectif de classement de l'exploration.</param>
+public sealed record OptimizationCandidate(StrategyDefinition Strategy, PerformanceMetrics Metrics, decimal Score);
 
 public sealed record OptimizationProgress(long Evaluated, long Planned, long Eligible, OptimizationCandidate? Best);
 
@@ -88,7 +88,16 @@ public sealed record OptimizationProgress(long Evaluated, long Planned, long Eli
 /// <param name="Evaluated">Combinaisons réellement essayées. C'est ce nombre, et non la taille
 /// du classement, qui mesure le risque de découverte fortuite.</param>
 /// <param name="Eligible">Combinaisons essayées ayant atteint le nombre minimal de trades.</param>
-public sealed record OptimizationReport(IReadOnlyList<OptimizationCandidate> Top, BigInteger SearchSpace, long Evaluated, long Eligible)
+/// <param name="Benchmark">L'achat-conservation de l'univers sur la même plage.</param>
+/// <param name="BenchmarkScore">Ce que l'objectif de classement vaut pour cette référence : la barre
+/// qu'une combinaison doit franchir pour avoir fait mieux que le marché.</param>
+public sealed record OptimizationReport(
+    IReadOnlyList<OptimizationCandidate> Top,
+    BigInteger SearchSpace,
+    long Evaluated,
+    long Eligible,
+    PerformanceMetrics? Benchmark = null,
+    decimal? BenchmarkScore = null)
 {
     public static OptimizationReport Empty { get; } = new([], BigInteger.Zero, 0, 0);
 }
@@ -99,8 +108,9 @@ public sealed record OptimizationReport(IReadOnlyList<OptimizationCandidate> Top
 /// tenu à jour. La mémoire ne dépend plus du nombre d'essais, seulement de <c>Top</c>.
 /// <para>Un cache unique d'indicateurs sert toutes les combinaisons : chaque variante n'est
 /// calculée qu'une fois par titre.</para>
-/// <para>Le classement se fait par <b>Calmar</b> et non par performance brute : maximiser le
-/// gain sur une période unique est du surapprentissage assumé.</para>
+/// <para>Le classement ne se fait jamais sur la performance brute — maximiser le gain sur une
+/// période unique est du surapprentissage assumé — mais sur un rendement rapporté au risque :
+/// Calmar par défaut, Sharpe, ou ratio d'information contre le marché.</para>
 /// </summary>
 public sealed class StrategyOptimizer
 {
@@ -170,6 +180,7 @@ public sealed class StrategyOptimizer
         // Un seul cache pour toutes les combinaisons : sans état après remplissage, il se lit
         // en parallèle sans verrou.
         var cache = request.Cache ?? new IndicatorCache(request.Universe);
+        var (benchmarkCurve, benchmark, benchmarkScore) = Benchmark(request);
         var ranking = new BoundedRanking(request.Top);
         var reportEvery = Math.Max(1, planned / 200);
         long evaluated = 0;
@@ -180,7 +191,7 @@ public sealed class StrategyOptimizer
             cancellationToken.ThrowIfCancellationRequested();
 
             var strategy = Compose(request, combination);
-            var metrics = new BacktestEngine().Run(new BacktestRequest
+            var result = new BacktestEngine().Run(new BacktestRequest
             {
                 Strategy = strategy,
                 Universe = request.Universe,
@@ -188,12 +199,14 @@ public sealed class StrategyOptimizer
                 From = request.From,
                 To = request.To,
                 Cache = cache,
-            }).Metrics;
+            });
 
-            if (metrics.TradeCount >= request.MinimumTrades)
+            if (result.Metrics.TradeCount >= request.MinimumTrades)
             {
                 Interlocked.Increment(ref eligible);
-                ranking.Offer(new OptimizationCandidate(strategy, metrics));
+
+                var score = Ranking.Score(request.Objective, result.Metrics, result.EquityCurve, benchmarkCurve);
+                ranking.Offer(new OptimizationCandidate(strategy, result.Metrics, score));
             }
 
             var done = Interlocked.Increment(ref evaluated);
@@ -219,7 +232,20 @@ public sealed class StrategyOptimizer
             }
         }
 
-        return new OptimizationReport(ranking.Ranked(), space.Total, evaluated, eligible);
+        return new OptimizationReport(ranking.Ranked(), space.Total, evaluated, eligible, benchmark, benchmarkScore);
+    }
+
+    /// <summary>L'achat-conservation de l'univers sur la plage explorée, ses mesures et son score.</summary>
+    private static (IReadOnlyList<EquityPoint> Curve, PerformanceMetrics Metrics, decimal Score) Benchmark(OptimizationRequest request)
+    {
+        var calendar = TradingCalendar.FromSeries(request.Universe).Slice(request.From, request.To);
+        IReadOnlyList<EquityPoint> curve = calendar.IsEmpty
+            ? []
+            : BuyAndHold.Curve(request.Universe, calendar.First, calendar.Last, request.InitialCash);
+
+        var metrics = PerformanceCalculator.Calculate(curve, [], request.InitialCash, 0m);
+
+        return (curve, metrics, Ranking.Score(request.Objective, metrics, curve, curve));
     }
 
     private static StrategyDefinition Compose(OptimizationRequest request, int[] combination) => new()
@@ -253,7 +279,7 @@ public sealed class StrategyOptimizer
 
     private static string Invariant(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>Meilleur d'abord : Calmar, puis rendement, puis empreinte pour départager sans dépendre de l'ordre d'arrivée.</summary>
+    /// <summary>Meilleur d'abord : score, puis rendement, puis empreinte pour départager sans dépendre de l'ordre d'arrivée.</summary>
     private static int Compare(OptimizationCandidate left, OptimizationCandidate right)
     {
         var byScore = right.Score.CompareTo(left.Score);

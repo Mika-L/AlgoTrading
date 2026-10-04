@@ -21,8 +21,8 @@ public class RuleScreeningTests
         ]
         """).Rules;
 
-    private static ScreeningReport Run(int minimumTrades = 0) => new RuleScreening().Run(
-        new OptimizationRequest { Catalog = Catalog, Universe = [Bars], MinimumTrades = minimumTrades },
+    private static ScreeningReport Run(int minimumTrades = 0, RankingObjective objective = RankingObjective.Calmar) => new RuleScreening().Run(
+        new OptimizationRequest { Catalog = Catalog, Universe = [Bars], MinimumTrades = minimumTrades, Objective = objective },
         cancellationToken: TestContext.Current.CancellationToken);
 
     private static ScreenedVariant Rsi(ScreeningReport report, decimal period, decimal bullishBelow) =>
@@ -75,6 +75,42 @@ public class RuleScreeningTests
         var variants = Run(minimumTrades: 1_000_000).Groups.SelectMany(static g => g.Variants).ToArray();
 
         variants.ShouldAllBe(v => !v.Eligible && v.NeighbourhoodScore == 0m && v.WorstNeighbour == 0m);
+    }
+
+    [Fact]
+    public void should_judge_neighbourhoods_on_the_requested_objective()
+    {
+        var report = Run(objective: RankingObjective.Sharpe);
+        var centre = Rsi(report, 14m, 25m);
+
+        report.Groups.SelectMany(static g => g.Variants).ShouldAllBe(v => v.Score == v.Metrics.Sharpe);
+        centre.NeighbourhoodScore.ShouldBe(new[] { centre, Rsi(report, 7m, 25m), Rsi(report, 21m, 25m), Rsi(report, 14m, 30m) }.Average(static v => v.Score));
+    }
+
+    [Fact]
+    public void should_shortlist_per_indicator_the_best_eligible_variants_with_a_positive_neighbourhood()
+    {
+        var report = Run();
+
+        var shortlist = report.Shortlist(2);
+
+        foreach (var group in report.Groups)
+        {
+            var expected = group.Variants.Where(static v => v.Eligible && v.NeighbourhoodScore > 0m).Take(2).Select(static v => v.Rule);
+            shortlist.Where(r => r.Indicator == group.Indicator).ShouldBe(expected);
+        }
+    }
+
+    [Fact]
+    public void should_shortlist_nothing_when_no_variant_trades_enough()
+    {
+        Run(minimumTrades: 1_000_000).Shortlist(3).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void should_refuse_to_shortlist_fewer_than_one_variant_per_indicator()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => Run().Shortlist(0));
     }
 
     [Fact]

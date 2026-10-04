@@ -1,5 +1,6 @@
 using AlgoTrading.Domain.Backtesting;
 using AlgoTrading.Domain.MarketData;
+using AlgoTrading.Domain.Reporting;
 using AlgoTrading.Domain.Strategies;
 using AlgoTrading.Domain.Tests.Support;
 using Shouldly;
@@ -100,6 +101,46 @@ public class StrategyOptimizerTests
         var bounded = Run(Request() with { Top = 5 }).Top.Select(static c => c.Strategy.Fingerprint);
 
         bounded.ShouldBe(full);
+    }
+
+    [Theory]
+    [InlineData(RankingObjective.Calmar)]
+    [InlineData(RankingObjective.Sharpe)]
+    public void should_rank_on_the_requested_objective(RankingObjective objective)
+    {
+        var top = Run(Request() with { Objective = objective }).Top;
+
+        top.Select(static c => c.Score).ShouldBeInOrder(SortDirection.Descending);
+        top.ShouldAllBe(c => c.Score == (objective == RankingObjective.Calmar ? c.Metrics.Calmar : c.Metrics.Sharpe));
+    }
+
+    [Fact]
+    public void should_rank_against_the_market_on_the_information_ratio()
+    {
+        var request = Request() with { Objective = RankingObjective.InformationRatio };
+        var report = Run(request);
+        var market = BuyAndHold.Curve([Bars], Bars.Dates[0], Bars.Dates[^1], request.InitialCash);
+        var leader = new BacktestEngine().Run(new BacktestRequest
+        {
+            Strategy = report.Top[0].Strategy,
+            Universe = [Bars],
+            InitialCash = request.InitialCash,
+        });
+
+        report.Top[0].Score.ShouldBe(PerformanceCalculator.InformationRatio(leader.EquityCurve, market));
+        report.Top.Select(static c => c.Score).ShouldBeInOrder(SortDirection.Descending);
+    }
+
+    [Fact]
+    public void should_score_buying_and_holding_as_the_bar_a_combination_must_clear()
+    {
+        var calmar = Run(Request());
+        var information = Run(Request() with { Objective = RankingObjective.InformationRatio });
+
+        calmar.Benchmark.ShouldNotBeNull();
+        calmar.BenchmarkScore.ShouldBe(calmar.Benchmark.Calmar);
+        // Face à lui-même, le marché n'a aucun écart à faire valoir.
+        information.BenchmarkScore.ShouldBe(0m);
     }
 
     [Fact]

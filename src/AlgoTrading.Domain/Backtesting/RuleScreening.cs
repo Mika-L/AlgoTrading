@@ -13,15 +13,17 @@ namespace AlgoTrading.Domain.Backtesting;
 /// <param name="Eligible">A atteint le nombre minimal de trades.</param>
 /// <param name="Neighbours">Variantes voisines : même règle, un seul réglage décalé d'un cran
 /// dans la grille.</param>
-/// <param name="NeighbourhoodScore">Calmar moyen de la variante et de ses voisines, une variante
+/// <param name="Score">La valeur de l'objectif de classement : Calmar, Sharpe ou ratio d'information.</param>
+/// <param name="NeighbourhoodScore">Score moyen de la variante et de ses voisines, une variante
 /// non éligible comptant pour zéro. Un plateau le garde haut, un pic isolé le fait chuter.</param>
-/// <param name="WorstNeighbour">Le plus faible Calmar du voisinage, compté de même.</param>
+/// <param name="WorstNeighbour">Le plus faible score du voisinage, compté de même.</param>
 public sealed record ScreenedVariant(
     StrategyDefinition Strategy,
     string Family,
     IReadOnlyDictionary<string, decimal> Axes,
     string Label,
     PerformanceMetrics Metrics,
+    decimal Score,
     bool Eligible,
     int Neighbours,
     decimal NeighbourhoodScore,
@@ -29,16 +31,33 @@ public sealed record ScreenedVariant(
 {
     public RuleConfig Rule => Strategy.Entry.Rules[0];
 
-    public decimal Score => Metrics.Calmar;
-
-    /// <summary>Ce que la variante prouve : son Calmar si elle a assez tradé, rien sinon.</summary>
+    /// <summary>Ce que la variante prouve : son score si elle a assez tradé, rien sinon.</summary>
     public decimal Evidence => Eligible ? Score : 0m;
 }
 
 /// <summary>Les variantes d'un indicateur, de la plus robuste à la moins robuste.</summary>
 public sealed record ScreeningGroup(string Indicator, IReadOnlyList<ScreenedVariant> Variants);
 
-public sealed record ScreeningReport(IReadOnlyList<ScreeningGroup> Groups, long Evaluated);
+public sealed record ScreeningReport(IReadOnlyList<ScreeningGroup> Groups, long Evaluated)
+{
+    /// <summary>
+    /// Les règles qui passent le criblage : par indicateur, les <paramref name="perIndicator"/>
+    /// meilleurs voisinages parmi les variantes éligibles dont le voisinage est positif. Avec le
+    /// ratio d'information, positif veut dire « mieux que le marché, en moyenne sur le plateau ».
+    /// </summary>
+    public IReadOnlyList<RuleConfig> Shortlist(int perIndicator)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(perIndicator, 1);
+
+        return
+        [
+            .. Groups.SelectMany(group => group.Variants
+                .Where(static v => v.Eligible && v.NeighbourhoodScore > 0m)
+                .Take(perIndicator)
+                .Select(static v => v.Rule)),
+        ];
+    }
+}
 
 /// <summary>
 /// Premier étage de l'entonnoir : chaque variante du catalogue est jouée seule, puis jugée avec
@@ -138,6 +157,7 @@ public sealed class RuleScreening
                 family[i].Axes,
                 StrategyOptimizer.Label(family[i].Rule),
                 family[i].Metrics,
+                family[i].Candidate.Score,
                 family[i].Eligible,
                 neighbours.Count,
                 (family[i].Evidence + neighbours.Sum()) / (neighbours.Count + 1),
@@ -155,8 +175,8 @@ public sealed class RuleScreening
 
         public bool Eligible { get; } = eligible;
 
-        /// <summary>Ce que la variante prouve : son Calmar si elle a assez tradé, rien sinon.</summary>
-        public decimal Evidence => Eligible ? Metrics.Calmar : 0m;
+        /// <summary>Ce que la variante prouve : son score si elle a assez tradé, rien sinon.</summary>
+        public decimal Evidence => Eligible ? Candidate.Score : 0m;
 
         /// <summary>Les réglages numériques, seuls susceptibles de former une grille.</summary>
         public SortedDictionary<string, decimal> Axes { get; } = AxesOf(candidate.Strategy.Entry.Rules[0]);
