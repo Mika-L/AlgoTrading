@@ -164,6 +164,22 @@ public class WalkForwardTests
     }
 
     [Fact]
+    public void should_deflate_each_winner_by_the_screened_variants_as_well_as_the_combinations()
+    {
+        var report = Run(Request() with { ScreenTopPerIndicator = 1 });
+        report.Windows.ShouldContain(static w => w.Selected != null && w.Screening != null && w.Screening.Evaluated > 0);
+
+        foreach (var window in report.Windows.Where(static w => w.Selected is not null))
+        {
+            // Le criblage a choisi les règles : ignorer ses essais placerait la barre trop bas.
+            window.DeflatedSharpe!.Value.ShouldBeLessThanOrEqualTo(window.Training.DeflatedSharpe(window.Selected!));
+        }
+
+        report.OutOfSampleSharpeProbability.ShouldBeInRange(0m, 1m);
+        report.BenchmarkSharpeProbability.ShouldBeInRange(0m, 1m);
+    }
+
+    [Fact]
     public void should_stay_in_cash_through_a_test_window_where_no_variant_passes_the_screening()
     {
         var request = Request() with { ScreenTopPerIndicator = 2 };

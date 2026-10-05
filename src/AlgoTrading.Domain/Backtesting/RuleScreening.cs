@@ -17,6 +17,8 @@ namespace AlgoTrading.Domain.Backtesting;
 /// <param name="NeighbourhoodScore">Score moyen de la variante et de ses voisines, une variante
 /// non éligible comptant pour zéro. Un plateau le garde haut, un pic isolé le fait chuter.</param>
 /// <param name="WorstNeighbour">Le plus faible score du voisinage, compté de même.</param>
+/// <param name="DeflatedSharpe">Probabilité que son vrai Sharpe dépasse le meilleur qu'aurait
+/// donné, au hasard, le criblage de tout le catalogue.</param>
 public sealed record ScreenedVariant(
     StrategyDefinition Strategy,
     string Family,
@@ -27,7 +29,8 @@ public sealed record ScreenedVariant(
     bool Eligible,
     int Neighbours,
     decimal NeighbourhoodScore,
-    decimal? WorstNeighbour)
+    decimal? WorstNeighbour,
+    decimal DeflatedSharpe)
 {
     public RuleConfig Rule => Strategy.Entry.Rules[0];
 
@@ -102,7 +105,7 @@ public sealed class RuleScreening
 
         var screened = points
             .GroupBy(static p => p.Family, StringComparer.Ordinal)
-            .SelectMany(static family => Neighbourhoods([.. family]))
+            .SelectMany(family => Neighbourhoods([.. family], report))
             .ToArray();
 
         var groups = screened
@@ -126,7 +129,7 @@ public sealed class RuleScreening
     /// Dans une famille, deux variantes sont voisines quand elles ne diffèrent que d'un réglage,
     /// d'un seul cran dans les valeurs que la grille donne à ce réglage.
     /// </summary>
-    private static IEnumerable<ScreenedVariant> Neighbourhoods(Point[] family)
+    private static IEnumerable<ScreenedVariant> Neighbourhoods(Point[] family, OptimizationReport report)
     {
         var steps = family[0].Axes.Keys.ToDictionary(
             static key => key,
@@ -161,7 +164,8 @@ public sealed class RuleScreening
                 family[i].Eligible,
                 neighbours.Count,
                 (family[i].Evidence + neighbours.Sum()) / (neighbours.Count + 1),
-                neighbours.Count == 0 ? null : neighbours.Min());
+                neighbours.Count == 0 ? null : neighbours.Min(),
+                report.DeflatedSharpe(family[i].Candidate));
         }
     }
 

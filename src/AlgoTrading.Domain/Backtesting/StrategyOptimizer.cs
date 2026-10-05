@@ -79,7 +79,9 @@ public sealed record OptimizationRequest
 /// se retrouve en rejouant la stratégie.
 /// </summary>
 /// <param name="Score">La valeur de l'objectif de classement de l'exploration.</param>
-public sealed record OptimizationCandidate(StrategyDefinition Strategy, PerformanceMetrics Metrics, decimal Score);
+/// <param name="Returns">Les moments de ses rendements quotidiens, de quoi éprouver son Sharpe
+/// une fois connu le nombre d'essais.</param>
+public sealed record OptimizationCandidate(StrategyDefinition Strategy, PerformanceMetrics Metrics, decimal Score, ReturnMoments Returns);
 
 public sealed record OptimizationProgress(long Evaluated, long Planned, long Eligible, OptimizationCandidate? Best);
 
@@ -91,15 +93,30 @@ public sealed record OptimizationProgress(long Evaluated, long Planned, long Eli
 /// <param name="Benchmark">L'achat-conservation de l'univers sur la même plage.</param>
 /// <param name="BenchmarkScore">Ce que l'objectif de classement vaut pour cette référence : la barre
 /// qu'une combinaison doit franchir pour avoir fait mieux que le marché.</param>
+/// <param name="SharpeVariance">Variance des Sharpe par séance de toutes les combinaisons
+/// essayées, éligibles ou non : la dispersion qu'aurait eue une recherche sans talent.</param>
 public sealed record OptimizationReport(
     IReadOnlyList<OptimizationCandidate> Top,
     BigInteger SearchSpace,
     long Evaluated,
     long Eligible,
     PerformanceMetrics? Benchmark = null,
-    decimal? BenchmarkScore = null)
+    decimal? BenchmarkScore = null,
+    double SharpeVariance = 0d)
 {
     public static OptimizationReport Empty { get; } = new([], BigInteger.Zero, 0, 0);
+
+    /// <summary>
+    /// Probabilité que le vrai Sharpe de la combinaison dépasse le meilleur qu'auraient donné
+    /// autant d'essais au hasard. Le classement la choisit parmi <see cref="Evaluated"/> : c'est
+    /// ce nombre qui fixe la barre.
+    /// </summary>
+    public decimal DeflatedSharpe(OptimizationCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        return SharpeStatistics.Deflated(candidate.Returns, Evaluated, SharpeVariance);
+    }
 }
 
 /// <summary>
@@ -182,6 +199,7 @@ public sealed class StrategyOptimizer
         var cache = request.Cache ?? new IndicatorCache(request.Universe);
         var (benchmarkCurve, benchmark, benchmarkScore) = Benchmark(request);
         var ranking = new BoundedRanking(request.Top);
+        var dispersion = new SharpeDispersion();
         var reportEvery = Math.Max(1, planned / 200);
         long evaluated = 0;
         long eligible = 0;
@@ -201,12 +219,16 @@ public sealed class StrategyOptimizer
                 Cache = cache,
             });
 
+            // Chaque essai compte dans la dispersion, éligible ou non : tous ont été tentés.
+            var returns = ReturnMoments.Of(result.EquityCurve);
+            dispersion.Add(returns.Sharpe);
+
             if (result.Metrics.TradeCount >= request.MinimumTrades)
             {
                 Interlocked.Increment(ref eligible);
 
                 var score = Ranking.Score(request.Objective, result.Metrics, result.EquityCurve, benchmarkCurve);
-                ranking.Offer(new OptimizationCandidate(strategy, result.Metrics, score));
+                ranking.Offer(new OptimizationCandidate(strategy, result.Metrics, score, returns));
             }
 
             var done = Interlocked.Increment(ref evaluated);
@@ -232,7 +254,7 @@ public sealed class StrategyOptimizer
             }
         }
 
-        return new OptimizationReport(ranking.Ranked(), space.Total, evaluated, eligible, benchmark, benchmarkScore);
+        return new OptimizationReport(ranking.Ranked(), space.Total, evaluated, eligible, benchmark, benchmarkScore, dispersion.Variance);
     }
 
     /// <summary>L'achat-conservation de l'univers sur la plage explorée, ses mesures et son score.</summary>

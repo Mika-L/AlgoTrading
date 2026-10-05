@@ -15,6 +15,9 @@
           Note="@($"Gagnantes : {Labels.Percent(Report.ProfitableWindowShare, 0)}")" />
     <Tile Label="Efficacité" Value="@(Report.Efficiency is { } efficiency ? Labels.Number(efficiency) : "—")"
           Note="Annualisé en test ÷ en apprentissage" />
+    <Tile Label="Sharpe réellement positif" Value="@Labels.Percent(Report.OutOfSampleSharpeProbability, 0)"
+          Tone="@Labels.Significance(Report.OutOfSampleSharpeProbability)"
+          Note="@($"Probabilité hors échantillon · marché : {Labels.Percent(Report.BenchmarkSharpeProbability, 0)}")" />
     <Tile Label="Stratégies essayées" Value="@Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture)" Note="Toutes fenêtres, criblage compris" />
 </div>
 
@@ -41,6 +44,7 @@
                     <th>Combinaison retenue</th>
                     <th class="num">@Ranking.Name(Objective) appr.</th>
                     <th class="num">Marché appr.</th>
+                    <th class="num" title="Probabilité que le gagnant batte le meilleur Sharpe qu'auraient donné, au hasard, les essais de sa fenêtre">Sharpe dégonflé appr.</th>
                     <th class="num">Rendement test</th>
                     <th class="num">Marché</th>
                     <th class="num">Calmar test</th>
@@ -63,6 +67,7 @@
                             <td class="mono">@selected.Strategy.Name</td>
                             <td class="num">@Labels.Number(selected.Score)</td>
                             <td class="num">@BenchmarkScore(window)</td>
+                            <td class="num">@Deflated(window)</td>
                             <td class="num @Tone(test.Metrics.TotalReturn)">@Labels.SignedPercent(test.Metrics.TotalReturn)</td>
                             <td class="num @Tone(window.BenchmarkReturn)">@Labels.SignedPercent(window.BenchmarkReturn)</td>
                             <td class="num">@Labels.Number(test.Metrics.Calmar)</td>
@@ -80,6 +85,7 @@
                             </td>
                             <td class="num">@(window.Selected is { } best ? Labels.Number(best.Score) : "—")</td>
                             <td class="num">@BenchmarkScore(window)</td>
+                            <td class="num">@Deflated(window)</td>
                             <td class="num">—</td>
                             <td class="num @Tone(window.BenchmarkReturn)">@Labels.SignedPercent(window.BenchmarkReturn)</td>
                             <td class="num">—</td>
@@ -127,6 +133,9 @@
 
     private static string BenchmarkScore(WalkForwardWindow window) =>
         window.Training.BenchmarkScore is { } score ? Labels.Number(score) : "—";
+
+    private static string Deflated(WalkForwardWindow window) =>
+        window.DeflatedSharpe is { } deflated ? Labels.Percent(deflated, 0) : "—";
 
     private static string? Tone(decimal value) => value > 0m ? "good" : value < 0m ? "bad" : null;
 }

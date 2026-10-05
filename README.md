@@ -112,8 +112,16 @@ walk-forward mené ensuite sur son export, ces tests ne sont plus hors échantil
 arrêter le criblage avant la première fenêtre de test, ou laisser `walk-forward` cribler
 lui-même dans chaque fenêtre d'apprentissage (`--screen-top`, ci-dessous).
 
-Le rapport donne le nombre de combinaisons réellement essayées. Il faudra en tenir compte pour
-corriger le meilleur score de la chance accumulée au fil des essais.
+Le gagnant de milliers d'essais a forcément un beau score : il faut le corriger de la chance
+accumulée au fil des essais. `screen`, `optimize` et `walk-forward` affichent pour cela le
+**Sharpe dégonflé** (Bailey et López de Prado, 2014). C'est la probabilité que le vrai Sharpe
+d'une stratégie dépasse le meilleur Sharpe qu'aurait donné, par pur hasard, le même nombre
+d'essais, compte tenu de la dispersion des Sharpe de tous les essais. Il tient compte aussi de
+la durée mesurée, de l'asymétrie et des queues épaisses des rendements. Sous 95 %, rien ne
+distingue le résultat de la chance. Dans `walk-forward`, le gagnant de chaque fenêtre est
+dégonflé par les combinaisons essayées **et** par les variantes criblées dans cette fenêtre.
+Hors échantillon, où aucune sélection n'a vu les séances, la colonne « Sharpe > 0 » donne la
+probabilité que le vrai Sharpe soit positif, pour la stratégie comme pour le marché.
 
 Le classement d'une exploration ne vaut que sur la période explorée. `walk-forward` optimise
 sur une fenêtre (36 mois par défaut), joue le gagnant sur les 12 mois suivants, décale d'un an
@@ -150,6 +158,14 @@ stratégie à +24,63 %, toujours sous le marché (+46,65 %) et pour une pire bai
 une règle dans les trois premières fenêtres : rien à combiner, la stratégie reste en
 liquidités, puis gagne 13,75 % sur la dernière, contre 19,85 % pour le marché. Aucune
 combinaison ne bat l'achat-conservation de façon répétée sur cette période.
+
+Le Sharpe dégonflé confirme ce verdict. Mêmes fenêtres, 3 000 tirages par fenêtre : les
+gagnants d'apprentissage du catalogue par défaut sont entre 56 % et 61 %, ceux de
+`--screen-top 2` entre 65 % et 77 %. Aucun n'approche 95 %. Hors échantillon, la stratégie a
+60 % (catalogue par défaut) ou 62 % (criblée) de chances d'avoir un vrai Sharpe positif,
+contre 86 % pour l'achat-conservation. Le criblage seul de `rules/screening.json` jusqu'à fin
+2023 culmine à 78 %, pour Bollinger(20, 2,5) : même le meilleur plateau ne se distingue pas de
+ce que 152 essais auraient sorti par hasard.
 
 ## Architecture
 

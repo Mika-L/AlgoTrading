@@ -71,7 +71,16 @@ public sealed record WalkForwardWindow(
     BacktestResult? Test,
     string? CashReason,
     IReadOnlyList<EquityPoint> Benchmark,
-    decimal BenchmarkReturn);
+    decimal BenchmarkReturn)
+{
+    /// <summary>
+    /// Sharpe dégonflé du gagnant sur son apprentissage. Il a été choisi au bout du criblage
+    /// <b>et</b> de la combinaison : les deux comptent dans le nombre d'essais.
+    /// </summary>
+    public decimal? DeflatedSharpe => Selected is null
+        ? null
+        : SharpeStatistics.Deflated(Selected.Returns, Training.Evaluated + (Screening?.Evaluated ?? 0), Training.SharpeVariance);
+}
 
 public sealed record WalkForwardProgress(int Window, int WindowCount, WalkForwardStage Stage, OptimizationProgress Optimization);
 
@@ -96,6 +105,15 @@ public sealed record WalkForwardReport(
     /// une chance de plus de tomber par hasard sur un bon score.
     /// </summary>
     public long Evaluated => Windows.Sum(static w => w.Training.Evaluated + (w.Screening?.Evaluated ?? 0));
+
+    /// <summary>
+    /// Probabilité que le vrai Sharpe hors échantillon soit positif. Aucune sélection ne s'est
+    /// faite sur ces séances : la barre est zéro, pas le maximum d'une recherche.
+    /// </summary>
+    public decimal OutOfSampleSharpeProbability => SharpeStatistics.Probabilistic(ReturnMoments.Of(OutOfSampleCurve));
+
+    /// <summary>La même probabilité pour l'achat-conservation, sur les mêmes séances.</summary>
+    public decimal BenchmarkSharpeProbability => SharpeStatistics.Probabilistic(ReturnMoments.Of(BenchmarkCurve));
 
     /// <summary>Part des fenêtres de test terminées en gain.</summary>
     public decimal ProfitableWindowShare =>
