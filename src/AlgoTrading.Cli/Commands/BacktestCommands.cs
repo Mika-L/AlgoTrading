@@ -159,7 +159,7 @@ public static class BacktestCommands
 
             var alongside = Alongside(ranking);
             output.WriteTable(
-                ["Rang", "Combinaison", Ranking.Name(ranking), .. alongside.Select(static m => m.Name), "Rendement", "Pire baisse", "Trades"],
+                ["Rang", "Combinaison", Ranking.Name(ranking), .. alongside.Select(static m => m.Name), "Sharpe dégonflé", "Rendement", "Pire baisse", "Trades"],
                 [
                     .. report.Top.Select(string[] (c, i) =>
                     [
@@ -167,11 +167,15 @@ public static class BacktestCommands
                         c.Strategy.Name,
                         c.Score.ToString("0.00", CultureInfo.CurrentCulture),
                         .. alongside.Select(m => m.Read(c.Metrics).ToString("0.00", CultureInfo.CurrentCulture)),
+                        ConsoleWriter.Percent(report.DeflatedSharpe(c)),
                         ConsoleWriter.Percent(c.Metrics.TotalReturn),
                         ConsoleWriter.Percent(c.Metrics.MaxDrawdown),
                         c.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
                     ]),
                 ]);
+
+            output.WriteLine();
+            output.WriteLine(DeflatedSharpeNote(report.Evaluated));
 
             if (response.SavedRunIds.Count > 0)
             {
@@ -248,7 +252,7 @@ public static class BacktestCommands
                 output.WriteLine();
                 output.WriteLine($"{group.Indicator} — {group.Variants.Count} variantes");
                 output.WriteTable(
-                    ["Variante", "Voisinage", name, "Pire voisine", "Voisines", .. alongside.Select(static m => m.Name), "Trades"],
+                    ["Variante", "Voisinage", name, "Pire voisine", "Voisines", .. alongside.Select(static m => m.Name), "Sharpe dégonflé", "Trades"],
                     [
                         .. group.Variants.Take(shown).Select(string[] (v) =>
                         [
@@ -258,6 +262,7 @@ public static class BacktestCommands
                             v.WorstNeighbour?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                             v.Neighbours.ToString(CultureInfo.CurrentCulture),
                             .. alongside.Select(m => m.Read(v.Metrics).ToString("0.00", CultureInfo.CurrentCulture)),
+                            ConsoleWriter.Percent(v.DeflatedSharpe),
                             v.Metrics.TradeCount.ToString(CultureInfo.CurrentCulture),
                         ]),
                     ]);
@@ -265,6 +270,7 @@ public static class BacktestCommands
 
             output.WriteLine();
             output.WriteLine($"{report.Evaluated:N0} variantes essayées. * : trop peu de trades pour être retenue.");
+            output.WriteLine(DeflatedSharpeNote(report.Evaluated));
 
             if (parse.GetValue(export) is { } target)
             {
@@ -355,7 +361,7 @@ public static class BacktestCommands
             output.WriteLine();
 
             output.WriteTable(
-                ["Apprentissage", "Test", "Règles", "Retenue", $"{name} appr.", "Marché appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
+                ["Apprentissage", "Test", "Règles", "Retenue", $"{name} appr.", "Marché appr.", "Sharpe dégonflé appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
                 [
                     .. report.Windows.Select(w => new[]
                     {
@@ -365,6 +371,7 @@ public static class BacktestCommands
                         w.Test is null ? $"en liquidités — {w.CashReason}" : w.Selected!.Strategy.Name,
                         w.Selected?.Score.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                         w.Training.BenchmarkScore?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                        w.DeflatedSharpe is { } deflated ? ConsoleWriter.Percent(deflated) : "—",
                         w.Test is null ? "—" : ConsoleWriter.Percent(w.Test.Metrics.TotalReturn),
                         ConsoleWriter.Percent(w.BenchmarkReturn),
                         w.Test?.Metrics.Calmar.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
@@ -372,7 +379,7 @@ public static class BacktestCommands
                     }),
                 ]);
 
-            static string[] Row(string label, PerformanceMetrics metrics) =>
+            static string[] Row(string label, PerformanceMetrics metrics, decimal positiveSharpe) =>
             [
                 label,
                 ConsoleWriter.Percent(metrics.TotalReturn),
@@ -380,24 +387,33 @@ public static class BacktestCommands
                 ConsoleWriter.Percent(metrics.MaxDrawdown),
                 metrics.Calmar.ToString("0.00", CultureInfo.CurrentCulture),
                 metrics.Sharpe.ToString("0.00", CultureInfo.CurrentCulture),
+                ConsoleWriter.Percent(positiveSharpe),
             ];
 
             output.WriteLine();
             output.WriteLine("Hors échantillon, fenêtres de test mises bout à bout :");
             output.WriteTable(
-                ["", "Rendement", "Annualisé", "Pire baisse", "Calmar", "Sharpe"],
-                [Row("Stratégie", report.OutOfSample), Row("Acheter et conserver", report.Benchmark)]);
+                ["", "Rendement", "Annualisé", "Pire baisse", "Calmar", "Sharpe", "Sharpe > 0"],
+                [
+                    Row("Stratégie", report.OutOfSample, report.OutOfSampleSharpeProbability),
+                    Row("Acheter et conserver", report.Benchmark, report.BenchmarkSharpeProbability),
+                ]);
 
             output.WriteLine();
             output.WriteLine($"Fenêtres gagnantes : {ConsoleWriter.Percent(report.ProfitableWindowShare)}. Fenêtres au-dessus du marché : {ConsoleWriter.Percent(report.OutperformingWindowShare)}. Trades : {report.OutOfSample.TradeCount:N0}.");
             output.WriteLine($"Efficacité (rendement annualisé en test rapporté à l'apprentissage) : {report.Efficiency?.ToString("0.00", CultureInfo.CurrentCulture) ?? "indéfinie"}.");
             output.WriteLine($"{report.Evaluated:N0} stratégies essayées au total, variantes criblées comprises.");
+            output.WriteLine("Sharpe dégonflé appr. : probabilité que le gagnant batte le meilleur Sharpe qu'auraient donné, au hasard, les essais de sa fenêtre.");
+            output.WriteLine("Sharpe > 0 : probabilité que le vrai Sharpe hors échantillon soit positif ; aucune sélection n'a vu ces séances.");
 
             return 0;
         });
 
         return command;
     }
+
+    private static string DeflatedSharpeNote(long evaluated) =>
+        $"Sharpe dégonflé : probabilité que le vrai Sharpe batte le meilleur qu'auraient donné {evaluated:N0} essais au hasard. Sous {SharpeStatistics.Significant:P0}, rien ne distingue le résultat de la chance.";
 
     /// <summary>Les mesures affichées à côté du score, sans répéter celle qui sert d'objectif.</summary>
     private static (string Name, Func<PerformanceMetrics, decimal> Read)[] Alongside(RankingObjective objective) =>

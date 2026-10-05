@@ -1,5 +1,6 @@
 using System.Globalization;
 using AlgoTrading.Domain.Backtesting;
+using AlgoTrading.Domain.Reporting;
 using AlgoTrading.Domain.Strategies;
 using AlgoTrading.Domain.Strategies.Rules;
 
@@ -65,6 +66,9 @@ public static class Labels
 
     public static string Percent(decimal fraction, int decimals = 1) =>
         (fraction * 100m).ToString("N" + decimals.ToString(CultureInfo.InvariantCulture), French) + " %";
+
+    /// <summary>Une probabilité qui franchit le seuil de signification se lit en vert.</summary>
+    public static string? Significance(decimal probability) => probability >= SharpeStatistics.Significant ? "good" : null;
 
     public static string SignedPercent(decimal fraction, int decimals = 1) =>
         (fraction > 0m ? "+" : string.Empty) + Percent(fraction, decimals);

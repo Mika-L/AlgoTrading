@@ -154,6 +154,20 @@ public class StrategyOptimizerTests
     }
 
     [Fact]
+    public void should_deflate_the_winner_by_the_number_of_combinations_tried()
+    {
+        var report = Run(Request());
+        var winner = report.Top[0];
+
+        report.SharpeVariance.ShouldBeGreaterThan(0d);
+
+        // Choisi parmi 34, le gagnant doit franchir une barre plus haute que zéro.
+        var deflated = report.DeflatedSharpe(winner);
+        deflated.ShouldBeInRange(0m, 1m);
+        deflated.ShouldBeLessThan(SharpeStatistics.Probabilistic(winner.Returns));
+    }
+
+    [Fact]
     public void should_report_progress_up_to_the_last_combination()
     {
         var reports = new List<OptimizationProgress>();

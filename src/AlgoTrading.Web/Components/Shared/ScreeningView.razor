@@ -2,6 +2,8 @@
     @Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture) variantes jouées seules. Le <strong>voisinage</strong> est le @Ranking.Name(Objective) moyen
     de la variante et de ses voisines de grille (un réglage décalé d'un cran) : un plateau le garde proche du score, un pic isolé l'en éloigne.
     Les indicateurs sont classés sur leur meilleur voisinage.
+    Le <strong>Sharpe dégonflé</strong> est la probabilité que le vrai Sharpe d'une variante batte le meilleur qu'auraient donné
+    @Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture) essais au hasard : sous 95 %, rien ne la distingue de la chance.
 </div>
 
 @foreach (var group in Report.Groups)
@@ -32,6 +34,7 @@
                         <th class="num">Pire voisine</th>
                         <th class="num">Voisines</th>
                         <th class="num">@(Objective == RankingObjective.Sharpe ? "Calmar" : "Sharpe")</th>
+                        <th class="num" title="Probabilité que le vrai Sharpe batte le meilleur qu'aurait donné le hasard en autant d'essais">Sharpe dégonflé</th>
                         <th class="num">Rendement</th>
                         <th class="num">Trades</th>
                         <th></th>
@@ -53,6 +56,7 @@
                             <td class="num">@(variant.WorstNeighbour is { } worst ? Labels.Number(worst) : "—")</td>
                             <td class="num">@variant.Neighbours</td>
                             <td class="num">@Labels.Number(Objective == RankingObjective.Sharpe ? variant.Metrics.Calmar : variant.Metrics.Sharpe)</td>
+                            <td class="num @Labels.Significance(variant.DeflatedSharpe)">@Labels.Percent(variant.DeflatedSharpe, 0)</td>
                             <td class="num @Tone(variant.Metrics.TotalReturn)">@Labels.SignedPercent(variant.Metrics.TotalReturn)</td>
                             <td class="num">@variant.Metrics.TradeCount.ToString("N0", CultureInfo.CurrentCulture)</td>
                             <td><button class="btn small ghost" @onclick="() => OnRetain.InvokeAsync(variant.Strategy)">Retenir</button></td>
