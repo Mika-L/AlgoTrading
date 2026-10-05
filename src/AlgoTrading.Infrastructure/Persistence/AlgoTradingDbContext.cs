@@ -17,6 +17,8 @@ public sealed class AlgoTradingDbContext(DbContextOptions<AlgoTradingDbContext> 
 
     public DbSet<BacktestRunRow> Runs => Set<BacktestRunRow>();
 
+    public DbSet<ExplorationRow> Explorations => Set<ExplorationRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -55,6 +57,18 @@ public sealed class AlgoTradingDbContext(DbContextOptions<AlgoTradingDbContext> 
             entity.Property(e => e.Universe).IsRequired();
             entity.HasIndex(e => e.Fingerprint);
             entity.HasIndex(e => e.RanAt);
+        });
+
+        modelBuilder.Entity<ExplorationRow>(entity =>
+        {
+            entity.ToTable("Explorations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.Universe).IsRequired();
+            entity.Property(e => e.Catalog).HasMaxLength(200);
+            entity.Property(e => e.Objective).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.Best).HasMaxLength(500);
+            entity.HasIndex(e => e.Universe);
         });
     }
 }

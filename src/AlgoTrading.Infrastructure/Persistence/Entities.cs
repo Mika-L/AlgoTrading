@@ -82,3 +82,37 @@ public sealed class BacktestRunRow
 
     public DateTimeOffset RanAt { get; set; }
 }
+
+/// <summary>
+/// Une exploration menée jusqu'au bout. Seuls son décompte d'essais et son gagnant sont gardés :
+/// assez pour cumuler les essais d'une session à l'autre, rien pour la rouvrir.
+/// </summary>
+public sealed class ExplorationRow
+{
+    public int Id { get; set; }
+
+    public required string Kind { get; set; }
+
+    /// <summary>Les titres explorés, triés : deux explorations du même univers ont la même clé.</summary>
+    public required string Universe { get; set; }
+
+    public DateOnly From { get; set; }
+
+    public DateOnly To { get; set; }
+
+    public string? Catalog { get; set; }
+
+    public required string Objective { get; set; }
+
+    public long Trials { get; set; }
+
+    public double MeanSharpe { get; set; }
+
+    public double SquaredDeviations { get; set; }
+
+    public string? Best { get; set; }
+
+    public decimal? BestDeflatedSharpe { get; set; }
+
+    public DateTimeOffset RanAt { get; set; }
+}

@@ -71,6 +71,13 @@ public sealed record OptimizationRequest
     /// fenêtre de walk-forward à la suivante, par exemple. Absent, chaque exploration a le sien.
     /// </summary>
     public IndicatorCache? Cache { get; init; }
+
+    /// <summary>
+    /// Les essais d'explorations antérieures sur les mêmes séances. Ils ne sont pas rejoués,
+    /// mais ils relèvent la barre du Sharpe dégonflé : le gagnant de cette exploration a été
+    /// choisi parmi eux aussi.
+    /// </summary>
+    public TrialTally History { get; init; } = TrialTally.Empty;
 }
 
 /// <summary>
@@ -93,29 +100,35 @@ public sealed record OptimizationProgress(long Evaluated, long Planned, long Eli
 /// <param name="Benchmark">L'achat-conservation de l'univers sur la même plage.</param>
 /// <param name="BenchmarkScore">Ce que l'objectif de classement vaut pour cette référence : la barre
 /// qu'une combinaison doit franchir pour avoir fait mieux que le marché.</param>
-/// <param name="SharpeVariance">Variance des Sharpe par séance de toutes les combinaisons
-/// essayées, éligibles ou non : la dispersion qu'aurait eue une recherche sans talent.</param>
 public sealed record OptimizationReport(
     IReadOnlyList<OptimizationCandidate> Top,
     BigInteger SearchSpace,
     long Evaluated,
     long Eligible,
     PerformanceMetrics? Benchmark = null,
-    decimal? BenchmarkScore = null,
-    double SharpeVariance = 0d)
+    decimal? BenchmarkScore = null)
 {
     public static OptimizationReport Empty { get; } = new([], BigInteger.Zero, 0, 0);
 
     /// <summary>
+    /// Toutes les combinaisons essayées, éligibles ou non, et la dispersion de leurs Sharpe :
+    /// celle qu'aurait eue une recherche sans talent.
+    /// </summary>
+    public TrialTally Trials { get; init; } = TrialTally.Empty;
+
+    /// <summary>Les essais d'explorations antérieures sur les mêmes séances.</summary>
+    public TrialTally History { get; init; } = TrialTally.Empty;
+
+    /// <summary>
     /// Probabilité que le vrai Sharpe de la combinaison dépasse le meilleur qu'auraient donné
-    /// autant d'essais au hasard. Le classement la choisit parmi <see cref="Evaluated"/> : c'est
-    /// ce nombre qui fixe la barre.
+    /// autant d'essais au hasard. Le classement la choisit parmi ses essais, mais l'exploration
+    /// elle-même a été choisie après celles qui l'ont précédée : les uns et les autres fixent la barre.
     /// </summary>
     public decimal DeflatedSharpe(OptimizationCandidate candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
 
-        return SharpeStatistics.Deflated(candidate.Returns, Evaluated, SharpeVariance);
+        return Trials.Deflate(candidate.Returns, History.Trials);
     }
 }
 
@@ -181,7 +194,7 @@ public sealed class StrategyOptimizer
         if (space.Total.IsZero)
         {
             // Un catalogue trop petit ne donne aucune combinaison : c'est un résultat, pas une erreur.
-            return OptimizationReport.Empty;
+            return OptimizationReport.Empty with { History = request.History };
         }
 
         var exhaustive = request.SampleSize is not { } sample || sample >= space.Total;
@@ -254,7 +267,11 @@ public sealed class StrategyOptimizer
             }
         }
 
-        return new OptimizationReport(ranking.Ranked(), space.Total, evaluated, eligible, benchmark, benchmarkScore, dispersion.Variance);
+        return new OptimizationReport(ranking.Ranked(), space.Total, evaluated, eligible, benchmark, benchmarkScore)
+        {
+            Trials = dispersion.Tally,
+            History = request.History,
+        };
     }
 
     /// <summary>L'achat-conservation de l'univers sur la plage explorée, ses mesures et son score.</summary>

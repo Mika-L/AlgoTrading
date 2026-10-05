@@ -1,5 +1,6 @@
 using AlgoTrading.Domain.Backtesting;
 using AlgoTrading.Domain.MarketData;
+using AlgoTrading.Domain.Reporting;
 using AlgoTrading.Domain.Strategies;
 using AlgoTrading.Domain.Tests.Support;
 using Shouldly;
@@ -171,12 +172,28 @@ public class WalkForwardTests
 
         foreach (var window in report.Windows.Where(static w => w.Selected is not null))
         {
-            // Le criblage a choisi les règles : ignorer ses essais placerait la barre trop bas.
-            window.DeflatedSharpe!.Value.ShouldBeLessThanOrEqualTo(window.Training.DeflatedSharpe(window.Selected!));
+            // Le criblage a choisi les règles : ses essais comptent dans le nombre comme dans la dispersion.
+            window.Trials.Trials.ShouldBe(window.Training.Evaluated + window.Screening!.Evaluated);
+            window.DeflatedSharpe.ShouldBe(window.Screening.Trials.Combine(window.Training.Trials).Deflate(window.Selected!.Returns));
         }
 
         report.OutOfSampleSharpeProbability.ShouldBeInRange(0m, 1m);
         report.BenchmarkSharpeProbability.ShouldBeInRange(0m, 1m);
+    }
+
+    [Fact]
+    public void should_count_past_explorations_only_in_the_training_windows_they_overlap()
+    {
+        // Une exploration passée sur 2017 : seuls les apprentissages 2017-2018 et 2017-07 à 2019-06 la recoupent.
+        var past = new PastTrials(new(2017, 1, 1), new(2017, 12, 31), new TrialTally(50_000, 0d, 50_000 * 0.0004));
+        var windows = Run(Request() with { History = new TrialHistory([past]) }).Windows;
+        var fresh = Run(Request()).Windows;
+
+        windows.Take(2).ShouldAllBe(w => w.History == past.Tally);
+        windows.Skip(2).ShouldAllBe(static w => w.History.Trials == 0);
+
+        windows[0].DeflatedSharpe!.Value.ShouldBeLessThan(fresh[0].DeflatedSharpe!.Value);
+        windows[2].DeflatedSharpe!.Value.ShouldBe(fresh[2].DeflatedSharpe!.Value, 1e-9m);
     }
 
     [Fact]

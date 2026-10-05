@@ -129,6 +129,7 @@ public static class BacktestCommands
                     Parallel = parse.GetValue(parallel),
                     Save = parse.GetValue(save),
                     Objective = ranking,
+                    CatalogName = CatalogName(parse.GetValue(rules)),
                 },
                 new ConsoleProgress(output, ranking),
                 cancellationToken).ConfigureAwait(false);
@@ -175,7 +176,7 @@ public static class BacktestCommands
                 ]);
 
             output.WriteLine();
-            output.WriteLine(DeflatedSharpeNote(report.Evaluated));
+            output.WriteLine(DeflatedSharpeNote(report.Trials, report.History));
 
             if (response.SavedRunIds.Count > 0)
             {
@@ -236,6 +237,7 @@ public static class BacktestCommands
                     InitialCash = parse.GetValue(cash),
                     Parallel = parse.GetValue(parallel),
                     Objective = ranking,
+                    CatalogName = CatalogName(parse.GetValue(rules)),
                 },
                 new ConsoleProgress(output, ranking),
                 cancellationToken).ConfigureAwait(false);
@@ -270,7 +272,7 @@ public static class BacktestCommands
 
             output.WriteLine();
             output.WriteLine($"{report.Evaluated:N0} variantes essayées. * : trop peu de trades pour être retenue.");
-            output.WriteLine(DeflatedSharpeNote(report.Evaluated));
+            output.WriteLine(DeflatedSharpeNote(report.Trials, report.History));
 
             if (parse.GetValue(export) is { } target)
             {
@@ -352,6 +354,7 @@ public static class BacktestCommands
                     Objective = ranking,
                     ScreenTopPerIndicator = parse.GetValue(screenTop),
                     RequireEdge = parse.GetValue(requireEdge),
+                    CatalogName = CatalogName(parse.GetValue(rules)),
                 },
                 new ConsoleWalkForwardProgress(output),
                 cancellationToken).ConfigureAwait(false);
@@ -361,7 +364,7 @@ public static class BacktestCommands
             output.WriteLine();
 
             output.WriteTable(
-                ["Apprentissage", "Test", "Règles", "Retenue", $"{name} appr.", "Marché appr.", "Sharpe dégonflé appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
+                ["Apprentissage", "Test", "Règles", "Retenue", $"{name} appr.", "Marché appr.", "Essais antérieurs", "Sharpe dégonflé appr.", "Rendement test", "Marché", "Calmar test", "Trades test"],
                 [
                     .. report.Windows.Select(w => new[]
                     {
@@ -371,6 +374,7 @@ public static class BacktestCommands
                         w.Test is null ? $"en liquidités — {w.CashReason}" : w.Selected!.Strategy.Name,
                         w.Selected?.Score.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
                         w.Training.BenchmarkScore?.ToString("0.00", CultureInfo.CurrentCulture) ?? "—",
+                        w.History.Trials.ToString("N0", CultureInfo.CurrentCulture),
                         w.DeflatedSharpe is { } deflated ? ConsoleWriter.Percent(deflated) : "—",
                         w.Test is null ? "—" : ConsoleWriter.Percent(w.Test.Metrics.TotalReturn),
                         ConsoleWriter.Percent(w.BenchmarkReturn),
@@ -403,7 +407,8 @@ public static class BacktestCommands
             output.WriteLine($"Fenêtres gagnantes : {ConsoleWriter.Percent(report.ProfitableWindowShare)}. Fenêtres au-dessus du marché : {ConsoleWriter.Percent(report.OutperformingWindowShare)}. Trades : {report.OutOfSample.TradeCount:N0}.");
             output.WriteLine($"Efficacité (rendement annualisé en test rapporté à l'apprentissage) : {report.Efficiency?.ToString("0.00", CultureInfo.CurrentCulture) ?? "indéfinie"}.");
             output.WriteLine($"{report.Evaluated:N0} stratégies essayées au total, variantes criblées comprises.");
-            output.WriteLine("Sharpe dégonflé appr. : probabilité que le gagnant batte le meilleur Sharpe qu'auraient donné, au hasard, les essais de sa fenêtre.");
+            output.WriteLine("Sharpe dégonflé appr. : probabilité que le gagnant batte le meilleur Sharpe qu'auraient donné, au hasard, les essais de sa fenêtre");
+            output.WriteLine("et ceux des explorations antérieures sur ces titres dont la période recoupe son apprentissage (essais antérieurs).");
             output.WriteLine("Sharpe > 0 : probabilité que le vrai Sharpe hors échantillon soit positif ; aucune sélection n'a vu ces séances.");
 
             return 0;
@@ -412,8 +417,13 @@ public static class BacktestCommands
         return command;
     }
 
-    private static string DeflatedSharpeNote(long evaluated) =>
-        $"Sharpe dégonflé : probabilité que le vrai Sharpe batte le meilleur qu'auraient donné {evaluated:N0} essais au hasard. Sous {SharpeStatistics.Significant:P0}, rien ne distingue le résultat de la chance.";
+    private static string DeflatedSharpeNote(TrialTally trials, TrialTally history) =>
+        history.Trials == 0
+            ? $"Sharpe dégonflé : probabilité que le vrai Sharpe batte le meilleur qu'auraient donné {trials.Trials:N0} essais au hasard. Sous {SharpeStatistics.Significant:P0}, rien ne distingue le résultat de la chance."
+            : $"Sharpe dégonflé : probabilité que le vrai Sharpe batte le meilleur qu'auraient donné {trials.Trials + history.Trials:N0} essais au hasard, dont {history.Trials:N0} d'explorations antérieures sur ces titres et des séances qui recoupent celles-ci. Sous {SharpeStatistics.Significant:P0}, rien ne distingue le résultat de la chance.";
+
+    /// <summary>Le catalogue tel que le journal des explorations le nomme.</summary>
+    private static string CatalogName(FileInfo? file) => file is null ? "par défaut" : Path.GetFileNameWithoutExtension(file.Name);
 
     /// <summary>Les mesures affichées à côté du score, sans répéter celle qui sert d'objectif.</summary>
     private static (string Name, Func<PerformanceMetrics, decimal> Read)[] Alongside(RankingObjective objective) =>

@@ -34,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMarketDataRepository, SqliteMarketDataRepository>();
         services.AddScoped<SqliteBacktestRunStore>();
         services.AddScoped<IBacktestRunStore>(sp => sp.GetRequiredService<SqliteBacktestRunStore>());
+        services.AddScoped<IExplorationJournal, SqliteExplorationJournal>();
         services.AddScoped<LegacyDatabaseImporter>();
         services.AddSingleton<IStrategyRepository, JsonFileStrategyRepository>();
 

@@ -23,6 +23,7 @@ public static class CommandTree
         root.Add(DbCommands.Build(services));
         root.Add(DataCommands.Build(services));
         root.Add(BacktestCommands.Build(services));
+        root.Add(ExplorationCommands.Build(services));
         root.Add(ReportCommands.Build(services));
 
         return root;

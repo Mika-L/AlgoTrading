@@ -18,7 +18,7 @@ namespace AlgoTrading.Domain.Backtesting;
 /// non éligible comptant pour zéro. Un plateau le garde haut, un pic isolé le fait chuter.</param>
 /// <param name="WorstNeighbour">Le plus faible score du voisinage, compté de même.</param>
 /// <param name="DeflatedSharpe">Probabilité que son vrai Sharpe dépasse le meilleur qu'aurait
-/// donné, au hasard, le criblage de tout le catalogue.</param>
+/// donné, au hasard, le criblage de tout le catalogue, explorations antérieures comprises.</param>
 public sealed record ScreenedVariant(
     StrategyDefinition Strategy,
     string Family,
@@ -43,6 +43,12 @@ public sealed record ScreeningGroup(string Indicator, IReadOnlyList<ScreenedVari
 
 public sealed record ScreeningReport(IReadOnlyList<ScreeningGroup> Groups, long Evaluated)
 {
+    /// <summary>Les variantes jouées et la dispersion de leurs Sharpe.</summary>
+    public TrialTally Trials { get; init; } = TrialTally.Empty;
+
+    /// <summary>Les essais d'explorations antérieures sur les mêmes séances.</summary>
+    public TrialTally History { get; init; } = TrialTally.Empty;
+
     /// <summary>
     /// Les règles qui passent le criblage : par indicateur, les <paramref name="perIndicator"/>
     /// meilleurs voisinages parmi les variantes éligibles dont le voisinage est positif. Avec le
@@ -122,7 +128,7 @@ public sealed class RuleScreening
             .ThenBy(static g => g.Indicator, StringComparer.Ordinal)
             .ToArray();
 
-        return new ScreeningReport(groups, report.Evaluated);
+        return new ScreeningReport(groups, report.Evaluated) { Trials = report.Trials, History = report.History };
     }
 
     /// <summary>
