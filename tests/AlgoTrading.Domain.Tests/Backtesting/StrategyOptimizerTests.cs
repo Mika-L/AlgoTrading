@@ -159,12 +159,24 @@ public class StrategyOptimizerTests
         var report = Run(Request());
         var winner = report.Top[0];
 
-        report.SharpeVariance.ShouldBeGreaterThan(0d);
+        report.Trials.Variance.ShouldBeGreaterThan(0d);
 
         // Choisi parmi 34, le gagnant doit franchir une barre plus haute que zéro.
         var deflated = report.DeflatedSharpe(winner);
         deflated.ShouldBeInRange(0m, 1m);
         deflated.ShouldBeLessThan(SharpeStatistics.Probabilistic(winner.Returns));
+    }
+
+    [Fact]
+    public void should_raise_the_bar_for_the_winner_with_the_trials_of_past_explorations()
+    {
+        var fresh = Run(Request());
+        var past = new TrialTally(10_000, fresh.Trials.MeanSharpe, fresh.Trials.Variance * 9_999);
+        var report = Run(Request() with { History = past });
+
+        report.History.ShouldBe(past);
+        report.Trials.Trials.ShouldBe(fresh.Trials.Trials);
+        report.DeflatedSharpe(report.Top[0]).ShouldBeLessThan(fresh.DeflatedSharpe(fresh.Top[0]));
     }
 
     [Fact]

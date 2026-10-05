@@ -18,7 +18,7 @@
     <Tile Label="Sharpe réellement positif" Value="@Labels.Percent(Report.OutOfSampleSharpeProbability, 0)"
           Tone="@Labels.Significance(Report.OutOfSampleSharpeProbability)"
           Note="@($"Probabilité hors échantillon · marché : {Labels.Percent(Report.BenchmarkSharpeProbability, 0)}")" />
-    <Tile Label="Stratégies essayées" Value="@Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture)" Note="Toutes fenêtres, criblage compris" />
+    <Tile Label="Stratégies essayées" Value="@Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture)" Note="@StrategiesNote" />
 </div>
 
 <div class="card">
@@ -44,7 +44,8 @@
                     <th>Combinaison retenue</th>
                     <th class="num">@Ranking.Name(Objective) appr.</th>
                     <th class="num">Marché appr.</th>
-                    <th class="num" title="Probabilité que le gagnant batte le meilleur Sharpe qu'auraient donné, au hasard, les essais de sa fenêtre">Sharpe dégonflé appr.</th>
+                    <th class="num" title="Essais d'explorations antérieures sur ces titres dont la période recoupe l'apprentissage">Essais antérieurs</th>
+                    <th class="num" title="Probabilité que le gagnant batte le meilleur Sharpe qu'auraient donné, au hasard, les essais de sa fenêtre et les essais antérieurs">Sharpe dégonflé appr.</th>
                     <th class="num">Rendement test</th>
                     <th class="num">Marché</th>
                     <th class="num">Calmar test</th>
@@ -67,6 +68,7 @@
                             <td class="mono">@selected.Strategy.Name</td>
                             <td class="num">@Labels.Number(selected.Score)</td>
                             <td class="num">@BenchmarkScore(window)</td>
+                            <td class="num">@window.History.Trials.ToString("N0", CultureInfo.CurrentCulture)</td>
                             <td class="num">@Deflated(window)</td>
                             <td class="num @Tone(test.Metrics.TotalReturn)">@Labels.SignedPercent(test.Metrics.TotalReturn)</td>
                             <td class="num @Tone(window.BenchmarkReturn)">@Labels.SignedPercent(window.BenchmarkReturn)</td>
@@ -85,6 +87,7 @@
                             </td>
                             <td class="num">@(window.Selected is { } best ? Labels.Number(best.Score) : "—")</td>
                             <td class="num">@BenchmarkScore(window)</td>
+                            <td class="num">@window.History.Trials.ToString("N0", CultureInfo.CurrentCulture)</td>
                             <td class="num">@Deflated(window)</td>
                             <td class="num">—</td>
                             <td class="num @Tone(window.BenchmarkReturn)">@Labels.SignedPercent(window.BenchmarkReturn)</td>
@@ -130,6 +133,10 @@
             new ChartSeries("Acheter et conserver", 1, [.. Report.BenchmarkCurve.Select(static p => new ChartPoint(p.Date, (double)p.Equity))]),
         ];
     }
+
+    private string StrategiesNote => Report.Windows.Max(static w => w.History.Trials) is var prior and > 0
+        ? $"Toutes fenêtres, criblage compris · jusqu'à {prior.ToString("N0", CultureInfo.CurrentCulture)} essais antérieurs par fenêtre"
+        : "Toutes fenêtres, criblage compris";
 
     private static string BenchmarkScore(WalkForwardWindow window) =>
         window.Training.BenchmarkScore is { } score ? Labels.Number(score) : "—";

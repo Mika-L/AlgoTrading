@@ -150,14 +150,14 @@ public sealed class SharpeDispersion
         }
     }
 
-    /// <summary>Variance d'échantillon des Sharpe par séance ; nulle en deçà de deux essais.</summary>
-    public double Variance
+    /// <summary>Le décompte des essais ajoutés jusqu'ici.</summary>
+    public TrialTally Tally
     {
         get
         {
             lock (_gate)
             {
-                return _count < 2 ? 0d : _squares / (_count - 1);
+                return new TrialTally(_count, _mean, _squares);
             }
         }
     }

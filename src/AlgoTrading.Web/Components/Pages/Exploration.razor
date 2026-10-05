@@ -237,6 +237,9 @@
         LoadCatalog();
     }
 
+    /// <summary>Le catalogue tel que le journal des explorations le nomme, comme la ligne de commande.</summary>
+    private string CatalogName => _catalogName == RuleCatalogLibrary.Default ? "par défaut" : _catalogName;
+
     private void LoadCatalog()
     {
         try
@@ -300,6 +303,7 @@
                         MinimumTrades = _minimumTrades,
                         InitialCash = InitialCash,
                         Objective = _objective,
+                        CatalogName = CatalogName,
                     },
                     progress,
                     token);
@@ -346,6 +350,7 @@
                         Objective = _objective,
                         ScreenTopPerIndicator = _screenTop,
                         RequireEdge = _requireEdge,
+                        CatalogName = CatalogName,
                     },
                     progress,
                     token);

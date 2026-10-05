@@ -40,6 +40,13 @@ public sealed record WalkForwardRequest
     /// liquidités : ne rien trouver est une réponse, pas une raison de jouer le moins mauvais.
     /// </summary>
     public bool RequireEdge { get; init; }
+
+    /// <summary>
+    /// Les explorations antérieures sur l'univers. Chaque fenêtre d'apprentissage compte les
+    /// essais de celles dont la période la recoupe ; les fenêtres d'un même walk-forward ne se
+    /// comptent pas entre elles, chacune n'étant qu'un pas de la même procédure.
+    /// </summary>
+    public TrialHistory History { get; init; } = TrialHistory.None;
 }
 
 /// <summary>Étape d'une fenêtre de walk-forward en cours de calcul.</summary>
@@ -73,13 +80,18 @@ public sealed record WalkForwardWindow(
     IReadOnlyList<EquityPoint> Benchmark,
     decimal BenchmarkReturn)
 {
+    /// <summary>Les essais d'explorations antérieures dont la période recoupe cet apprentissage.</summary>
+    public TrialTally History { get; init; } = TrialTally.Empty;
+
+    /// <summary>Les essais de la fenêtre : variantes criblées et combinaisons.</summary>
+    public TrialTally Trials => (Screening?.Trials ?? TrialTally.Empty).Combine(Training.Trials);
+
     /// <summary>
     /// Sharpe dégonflé du gagnant sur son apprentissage. Il a été choisi au bout du criblage
-    /// <b>et</b> de la combinaison : les deux comptent dans le nombre d'essais.
+    /// <b>et</b> de la combinaison, après les explorations antérieures sur ces séances : tous
+    /// comptent dans le nombre d'essais.
     /// </summary>
-    public decimal? DeflatedSharpe => Selected is null
-        ? null
-        : SharpeStatistics.Deflated(Selected.Returns, Training.Evaluated + (Screening?.Evaluated ?? 0), Training.SharpeVariance);
+    public decimal? DeflatedSharpe => Selected is null ? null : Trials.Deflate(Selected.Returns, History.Trials);
 }
 
 public sealed record WalkForwardProgress(int Window, int WindowCount, WalkForwardStage Stage, OptimizationProgress Optimization);
@@ -182,7 +194,8 @@ public sealed class WalkForward
             var (trainFrom, trainTo, testFrom, testTo) = windows[index];
             var window = index + 1;
 
-            var training = optimization with { From = trainFrom, To = trainTo, Cache = cache };
+            var history = request.History.Overlapping(trainFrom, trainTo);
+            var training = optimization with { From = trainFrom, To = trainTo, Cache = cache, History = history };
             ScreeningReport? screening = null;
             var catalog = optimization.Catalog;
 
@@ -199,7 +212,8 @@ public sealed class WalkForward
             var explored = catalog.Count == 0
                 ? OptimizationReport.Empty
                 : new StrategyOptimizer().Run(
-                    training with { Catalog = catalog },
+                    // Le criblage a précédé la combinaison sur les mêmes séances : ses essais comptent.
+                    training with { Catalog = catalog, History = history.Combine(screening?.Trials ?? TrialTally.Empty) },
                     progress is null ? null : new WindowProgress(progress, window, windows.Count, WalkForwardStage.Combining),
                     cancellationToken);
 
@@ -230,7 +244,10 @@ public sealed class WalkForward
             var benchmarkReturn = benchmark.Count == 0 ? 0m : (benchmark[^1].Equity / optimization.InitialCash) - 1m;
 
             played.Add(new WalkForwardWindow(
-                trainFrom, trainTo, testFrom, testTo, screening, catalog, explored, selected, test, cashReason, benchmark, benchmarkReturn));
+                trainFrom, trainTo, testFrom, testTo, screening, catalog, explored, selected, test, cashReason, benchmark, benchmarkReturn)
+            {
+                History = history,
+            });
         }
 
         var curve = Chain(played.Select(w => w.Test is { EquityCurve.Count: > 0 } test

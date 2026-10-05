@@ -3,7 +3,12 @@
     de la variante et de ses voisines de grille (un réglage décalé d'un cran) : un plateau le garde proche du score, un pic isolé l'en éloigne.
     Les indicateurs sont classés sur leur meilleur voisinage.
     Le <strong>Sharpe dégonflé</strong> est la probabilité que le vrai Sharpe d'une variante batte le meilleur qu'auraient donné
-    @Report.Evaluated.ToString("N0", CultureInfo.CurrentCulture) essais au hasard : sous 95 %, rien ne la distingue de la chance.
+    @((Report.Evaluated + Report.History.Trials).ToString("N0", CultureInfo.CurrentCulture)) essais au hasard : sous 95 %, rien ne la distingue de la chance.
+    @if (Report.History.Trials > 0)
+    {
+        <text>Ce nombre compte les @Report.History.Trials.ToString("N0", CultureInfo.CurrentCulture) essais des explorations antérieures sur ces titres
+        dont les séances recoupent celles-ci : relancer un criblage repose la question aux mêmes données.</text>
+    }
 </div>
 
 @foreach (var group in Report.Groups)

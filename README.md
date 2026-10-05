@@ -36,7 +36,8 @@ criblage s'y lit indicateur par indicateur, avec une carte de chaleur sur deux r
 choix où les plateaux se repèrent d'un coup d'œil. Le walk-forward y trace la courbe hors
 échantillon face à l'achat-conservation. « Retenir » enregistre une variante ou une
 combinaison comme stratégie et l'ouvre dans l'éditeur. Le calcul tourne tant que l'onglet
-reste ouvert : rien n'est persisté, et quitter la page l'interrompt.
+reste ouvert, et quitter la page l'interrompt. Les résultats ne sont pas persistés, mais une
+exploration menée jusqu'au bout entre au journal des explorations, comme en ligne de commande.
 
 ## Commandes
 
@@ -52,6 +53,7 @@ reste ouvert : rien n'est persisté, et quitter la page l'interrompt.
 | `algo backtest optimize --rules <fichier>` | Explore les combinaisons de règles (`--min-k`, `--max-k`, `--top`, `--min-trades`, `--sample`, `--seed`, `--objective`). |
 | `algo backtest walk-forward --rules <fichier>` | Optimise sur une fenêtre, juge le gagnant sur la suivante (`--train-months`, `--test-months`, `--to`, `--objective`, `--screen-top`, `--require-edge`). |
 | `algo backtest compare --runs 12,17` | Compare des résultats enregistrés. |
+| `algo explorations list` | Journal des explorations : séances jugées, essais, gagnant (`--limit`). |
 | `algo report show --run <n>` | Affiche un résultat. |
 | `algo report chart --run <n>` | Rejoue un run et exporte CSV et graphique. |
 
@@ -122,6 +124,20 @@ distingue le résultat de la chance. Dans `walk-forward`, le gagnant de chaque f
 dégonflé par les combinaisons essayées **et** par les variantes criblées dans cette fenêtre.
 Hors échantillon, où aucune sélection n'a vu les séances, la colonne « Sharpe > 0 » donne la
 probabilité que le vrai Sharpe soit positif, pour la stratégie comme pour le marché.
+
+Le nombre d'essais ne s'arrête pas à l'exploration en cours. Relancer un criblage avec un autre
+catalogue, un autre objectif ou une autre graine, c'est reposer la question aux mêmes données :
+chaque relance donne une chance de plus de tomber sur un beau score par hasard. Toute
+exploration menée jusqu'au bout (`screen`, `optimize`, chaque fenêtre de `walk-forward`, en
+ligne de commande comme dans l'interface) entre donc dans un **journal**, en base : titres,
+séances jugées, nombre d'essais, dispersion de leurs Sharpe, gagnant. Une nouvelle exploration
+compte les essais des explorations passées sur le même univers demandé dont les séances
+recoupent les siennes, ne serait-ce que d'une séance ; dans `walk-forward`, chaque fenêtre
+d'apprentissage compte celles qui la recoupent (colonne « Essais antérieurs »). Les fenêtres
+d'un même walk-forward ne se comptent pas entre elles : ce sont les pas d'une seule procédure.
+Les essais antérieurs relèvent le nombre, pas la dispersion, qui reste celle de l'exploration en
+cours : relancer à l'identique ne peut ainsi que faire baisser le Sharpe dégonflé. Une
+exploration interrompue n'est pas enregistrée. `algo explorations list` affiche le journal.
 
 Le classement d'une exploration ne vaut que sur la période explorée. `walk-forward` optimise
 sur une fenêtre (36 mois par défaut), joue le gagnant sur les 12 mois suivants, décale d'un an

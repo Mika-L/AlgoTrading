@@ -112,6 +112,6 @@ public class SharpeStatisticsTests
         }
 
         // Variance d'échantillon de { 0,01 ; 0,03 ; −0,02 ; 0,04 }.
-        dispersion.Variance.ShouldBe(0.0007, 1e-12);
+        dispersion.Tally.Variance.ShouldBe(0.0007, 1e-12);
     }
 }

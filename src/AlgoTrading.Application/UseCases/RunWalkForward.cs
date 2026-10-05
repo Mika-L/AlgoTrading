@@ -40,9 +40,12 @@ public sealed record RunWalkForwardRequest
     public int? ScreenTopPerIndicator { get; init; }
 
     public bool RequireEdge { get; init; }
+
+    /// <summary>Le nom du catalogue, pour le journal des explorations.</summary>
+    public string? CatalogName { get; init; }
 }
 
-public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
+public sealed class RunWalkForwardHandler(IMarketDataRepository repository, IExplorationJournal journal)
 {
     public async Task<WalkForwardReport> HandleAsync(
         RunWalkForwardRequest request,
@@ -51,10 +54,12 @@ public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var tradable = await repository.LoadTradableAsync(request.Universe, request.From, request.To, cancellationToken).ConfigureAwait(false);
+        var symbols = await repository.RequestedAsync(request.Universe, cancellationToken).ConfigureAwait(false);
+        var tradable = await repository.LoadTradableAsync(symbols, request.From, request.To, cancellationToken).ConfigureAwait(false);
+        var history = await journal.HistoryAsync(symbols, cancellationToken).ConfigureAwait(false);
 
         // L'exploration est synchrone et longue : elle ne doit pas occuper le fil de l'appelant.
-        return await Task.Run(
+        var report = await Task.Run(
             () => new WalkForward().Run(
                 new WalkForwardRequest
                 {
@@ -79,9 +84,28 @@ public sealed class RunWalkForwardHandler(IMarketDataRepository repository)
                     TestMonths = request.TestMonths,
                     ScreenTopPerIndicator = request.ScreenTopPerIndicator,
                     RequireEdge = request.RequireEdge,
+                    History = history,
                 },
                 progress,
                 cancellationToken),
             cancellationToken).ConfigureAwait(false);
+
+        // Une entrée par fenêtre, enregistrées ensemble à la fin : les fenêtres d'un même
+        // walk-forward ne se comptent pas entre elles.
+        await journal.RecordAsync(
+            [
+                .. report.Windows
+                    .Where(static w => w.Trials.Trials > 0)
+                    .Select(w => new ExplorationEntry(ExplorationKind.WalkForwardWindow, symbols, w.TrainFrom, w.TrainTo, w.Trials)
+                    {
+                        Catalog = request.CatalogName,
+                        Objective = request.Objective,
+                        Best = w.Selected?.Strategy.Name,
+                        BestDeflatedSharpe = w.DeflatedSharpe,
+                    }),
+            ],
+            cancellationToken).ConfigureAwait(false);
+
+        return report;
     }
 }

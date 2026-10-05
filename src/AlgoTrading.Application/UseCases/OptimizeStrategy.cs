@@ -37,11 +37,14 @@ public sealed record OptimizeStrategyRequest
 
     /// <summary>Persiste les résultats retenus.</summary>
     public bool Save { get; init; }
+
+    /// <summary>Le nom du catalogue, pour le journal des explorations.</summary>
+    public string? CatalogName { get; init; }
 }
 
 public sealed record OptimizeStrategyResponse(OptimizationReport Report, IReadOnlyList<int> SavedRunIds);
 
-public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IBacktestRunStore store)
+public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IBacktestRunStore store, IExplorationJournal journal)
 {
     public async Task<OptimizeStrategyResponse> HandleAsync(
         OptimizeStrategyRequest request,
@@ -50,7 +53,10 @@ public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IB
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var tradable = await repository.LoadTradableAsync(request.Universe, request.From, request.To, cancellationToken).ConfigureAwait(false);
+        var symbols = await repository.RequestedAsync(request.Universe, cancellationToken).ConfigureAwait(false);
+        var tradable = await repository.LoadTradableAsync(symbols, request.From, request.To, cancellationToken).ConfigureAwait(false);
+        var sessions = TradableUniverse.Sessions(tradable, request.From, request.To);
+        var history = await journal.HistoryAsync(symbols, cancellationToken).ConfigureAwait(false);
 
         var report = new StrategyOptimizer().Run(new OptimizationRequest
         {
@@ -68,7 +74,25 @@ public sealed class OptimizeStrategyHandler(IMarketDataRepository repository, IB
             Seed = request.Seed,
             OneVariantPerIndicator = request.OneVariantPerIndicator,
             Objective = request.Objective,
+            History = history.Overlapping(sessions.First, sessions.Last),
         }, progress, cancellationToken);
+
+        if (report.Evaluated > 0)
+        {
+            var best = report.Top.Count == 0 ? null : report.Top[0];
+
+            await journal.RecordAsync(
+                [
+                    new ExplorationEntry(ExplorationKind.Optimization, symbols, sessions.First, sessions.Last, report.Trials)
+                    {
+                        Catalog = request.CatalogName,
+                        Objective = request.Objective,
+                        Best = best?.Strategy.Name,
+                        BestDeflatedSharpe = best is null ? null : report.DeflatedSharpe(best),
+                    },
+                ],
+                cancellationToken).ConfigureAwait(false);
+        }
 
         var saved = new List<int>();
 
